@@ -1,5 +1,5 @@
 #include "gesture_cnn.h"
-#include "weights.h"
+#include "gesture_cnn_weights.h"
 
 // Helper: ReLU Activation
 data_t relu(data_t x) {
