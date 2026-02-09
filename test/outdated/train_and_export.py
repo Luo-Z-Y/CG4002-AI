@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import os
-from models import GestureCNN, VoiceCNN
+from test.outdated.models import GestureCNN, VoiceCNN
 
 # 1. DATA GENERATOR (Improved for 4 Gesture classes and 3 Voice classes)
 def get_synthetic_data(samples=100):
