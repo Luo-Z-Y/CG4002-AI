@@ -117,50 +117,24 @@ We use Vitis HLS directives to maximize Ultra96 performance:
 3. Connect DMA `mm2s_introut` and `s2mm_introut` to Zynq `pl_ps_irq0` via a Concat block.
 4. Generate Bitstream and Export `.xsa`.
 
+
 ### 4. Deployment (Ultra96)
-1. Upload `test/` folder and `.xsa` file to the board.
-2. Run:
+1. Upload the `test/` folder and `.xsa` file to the board.
+2. Before running the test script, set up the environment as follows:
   ```bash
-  sudo python3 test.py
+  sudo su -
+  source /usr/local/share/pynq-venv/bin/activate
+  export XILINX_XRT=/usr
+  cd /home/xilinx/cg4002_test
   ```
-3. The script will:
+  - `sudo su -`: Switches to the root user (required for DMA access).
+  - `source /usr/local/share/pynq-venv/bin/activate`: Activates the PYNQ Python environment.
+  - `export XILINX_XRT=/usr`: Ensures Xilinx Runtime (XRT) is available for FPGA communication.
+  - `cd /home/xilinx/cg4002_test`: Change to your project directory (adjust if needed).
+3. Now run the test script:
+  ```bash
+  python3 test.py
+  ```
+4. The script will:
   - Run a smoke test (1 sample per class)
   - Run 300 random inferences (confusion matrix, latency report)
-
----
-
-## 🗓️ Roadmap
-
-- [x] 1D-CNN architecture (window=60)
-- [x] Data pipeline: parsing, resampling, augmentation, normalization
-- [x] HLS: C++ core with AXI-Stream & fixed-point
-- [x] Integration: DMA interrupts & Python driver
-- [x] Verification: >95% accuracy on-board
-- [ ] Voice: Finalize MFCC extractor for FPGA
-
-### 4. Deployment (Ultra96)
-
-1. Upload `test/` folder and `.xsa` file to the board.
-2. Run the verification script:
-```bash
-sudo python3 test.py
-
-```
-
-
-3. Script performs:
-* **Smoke Test:** Validates 1 sample per class.
-* **Random Test:** Runs 300 random inferences to generate a confusion matrix and latency report.
-
-
-
----
-
-## 🗓️ Roadmap
-
-* [x] **Architecture:** 1D-CNN defined (Window=60)
-* [x] **Data Pipeline:** Parsing, Resampling, Augmentation, Normalization
-* [x] **HLS:** C++ Core with AXI-Stream & Fixed-Point
-* [x] **Integration:** DMA Interrupts & Python Driver operational
-* [x] **Verification:** >95% Accuracy on test set verified on-board
-* [ ] **Voice:** Finalize MFCC extractor for FPGA
