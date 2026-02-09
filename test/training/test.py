@@ -6,7 +6,7 @@ import time
 # ==========================================
 # 1. SETUP FPGA (No Reboot Needed)
 # ==========================================
-XSA_PATH = "gesture_cnn.xsa"
+XSA_PATH = "gesture_cnn_updated.xsa"
 CSV_PATH = "augmented_imudata.csv"
 
 print(f"Programming FPGA with {XSA_PATH}...")
@@ -47,12 +47,18 @@ for measure_id, group in grouped:
     flat_data = raw_matrix.flatten().astype(np.float32)
     np.copyto(in_buffer, flat_data)
     
+    # Cache maintenance
+    in_buffer.flush()
+    out_buffer.invalidate()
+
     # Run FPGA
-    dma.sendchannel.transfer(in_buffer)
     dma.recvchannel.transfer(out_buffer)
+    dma.sendchannel.transfer(in_buffer)
     dma.sendchannel.wait()
     dma.recvchannel.wait()
     
+    out_buffer.invalidate()
+
     # Check Result
     pred = int(out_buffer[0])
     status = "✅ PASS" if pred == label_id else f"❌ FAIL (Got {LABELS[pred]})"
