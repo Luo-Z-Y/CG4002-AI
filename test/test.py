@@ -12,7 +12,7 @@ from preprocess import GesturePreprocessor
 # ============================================================
 # CONFIG
 # ============================================================
-XSA_PATH = "gesture_cnn_updated.xsa"
+XSA_PATH = "gesture_cnn.xsa"
 CSV_PATH = "augmented_imudata.csv"
 
 LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
@@ -191,7 +191,7 @@ def main():
     out_buffer = allocate(shape=(1,), dtype=np.int32)
 
     # Your preprocess.py now has fixed mean/std inside the class
-    pre = GesturePreprocessor(fs=50, max_len=100, target_len=60)
+    pre = GesturePreprocessor(fs=50, target_len=60, max_len_s=2.0)
 
     print("✅ FPGA Ready.")
     print("\n--- Loading CSV ---")
