@@ -133,8 +133,23 @@ We use Vitis HLS directives to maximize Ultra96 performance:
   - `cd /home/xilinx/cg4002_test`: Change to your project directory (adjust if needed).
 3. Now run the test script:
   ```bash
-  python3 test.py
+  python3 test.py --tag baseline_perf --cpu-governor performance --pl-clock-mhz 100 --save-dir report/evidence
   ```
+  - `--tag baseline_perf`: Labels this run (used in output folder name) so you can distinguish baseline vs power-saving experiments.
+  - `--cpu-governor performance`: Records the CPU governor setting used for this run in the saved summary files.
+  - `--pl-clock-mhz 100`: Records the programmable-logic clock (MHz) used for this run in the saved summary files.
+  - `--save-dir report/evidence`: Writes all generated evidence files into `report/evidence/<timestamp>_<tag>/`.
+
+  Optional flags:
+  - `--power-w <value>`: Attach measured board/on-chip power (W) to the run summary for power-management comparisons.
+  - `--n-random <N>`: Number of random evaluation windows (default: 300).
+  - `--seed <int>`: Random seed for reproducible window selection (default: 42).
+  - `--timeout-s <seconds>`: DMA timeout threshold per inference (default: 2.0s).
+  - `--xsa-path <file>`: Path to the hardware overlay file (default set in script).
+  - `--csv-path <file>`: Path to evaluation CSV dataset (default set in script).
+  - `--no-smoke`: Skip 1-sample-per-class smoke test.
+  - `--no-random`: Skip random-test evaluation and only run smoke test.
 4. The script will:
   - Run a smoke test (1 sample per class)
   - Run 300 random inferences (confusion matrix, latency report)
+  - Save report-ready evidence files (`summary.json`, `summary.txt`, `confusion_matrix.csv`, `latency_samples.csv`)
