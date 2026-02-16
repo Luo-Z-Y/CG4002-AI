@@ -193,7 +193,7 @@ class DualIPRouter:
 
 
 # ------------------------------------------------------------------
-# Data source hooks (replace these with your real sensor integration)
+# Data source hooks (replace these with real sensor integration)
 # ------------------------------------------------------------------
 def fetch_imu_window() -> Optional[np.ndarray]:
     # Return np.float32 [60, 6] when available; otherwise None.
