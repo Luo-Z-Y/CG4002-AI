@@ -1,7 +1,7 @@
 #ifndef WEIGHTS_H
 #define WEIGHTS_H
 
-#include "typedefs.h"
+#include "gesture_typedefs.h"
 
 // PyTorch Layer: conv1.weight (Shape: (16, 6, 3))
 static const data_t conv1_w[288] = {

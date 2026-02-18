@@ -8,13 +8,13 @@
 // Voice model configuration
 #define VOICE_NUM_MFCC 40
 #define VOICE_NUM_FRAMES 50
-#define VOICE_NUM_CLASSES 5   // yes, no, go, unknown, silence
+#define VOICE_NUM_CLASSES 3   // go, no, yes
 
-// DS block 1: pw 40->16, dw(k=3), pool2 => 25
+// Block 1: conv 40->16 (k=3) + pool2 => 25
 #define VOICE_B1_CH 16
 #define VOICE_B1_T 25
 
-// DS block 2: pw 16->32, dw(k=3), pool2 => 12
+// Block 2: conv 16->32 (k=3) + pool2 => 12
 #define VOICE_B2_CH 32
 #define VOICE_B2_T 12
 

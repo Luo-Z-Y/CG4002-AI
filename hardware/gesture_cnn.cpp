@@ -1,5 +1,6 @@
 #include "gesture_cnn.h"
 #include "gesture_cnn_weights.h"
+#include <ap_int.h>
 
 // Helper: ReLU Activation
 data_t relu(data_t x) {
@@ -10,6 +11,10 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
     #pragma HLS INTERFACE axis port=in_stream
     #pragma HLS INTERFACE axis port=out_stream
     #pragma HLS INTERFACE s_axilite port=return
+    #pragma HLS ARRAY_PARTITION variable=conv1_w cyclic factor=3 dim=1
+    #pragma HLS ARRAY_PARTITION variable=conv2_w cyclic factor=3 dim=1
+    #pragma HLS ARRAY_PARTITION variable=fc1_w cyclic factor=16 dim=1
+    #pragma HLS ARRAY_PARTITION variable=fc2_w cyclic factor=8 dim=1
 
     // Internal buffers
     data_t input_buffer[NUM_SENSORS][WINDOW_SIZE];
@@ -46,7 +51,9 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
                 data_t sum = (data_t)conv1_b[o];
 
                 for (int i = 0; i < 6; i++) {
+                    #pragma HLS PIPELINE II=1
                     for (int k = 0; k < 3; k++) { 
+                        #pragma HLS UNROLL
                         int in_t = curr_t + k - 1; // Padding 1
                         if (in_t >= 0 && in_t < WINDOW_SIZE) {
                             int w_idx = o*(6*3) + i*3 + k;
@@ -76,7 +83,9 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
                 data_t sum = (data_t)conv2_b[o];
 
                 for (int i = 0; i < 16; i++) {
+                    #pragma HLS PIPELINE II=1
                     for (int k = 0; k < 3; k++) {
+                        #pragma HLS UNROLL
                         int in_t = curr_t + k - 1;
                         if (in_t >= 0 && in_t < 30) {
                             int w_idx = o*(16*3) + i*3 + k;
@@ -103,6 +112,7 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
         // Flatten Order: Channels first, then Time
         for (int c = 0; c < 32; c++) {
             for (int t = 0; t < 15; t++) {
+                #pragma HLS PIPELINE II=1
                 int w_idx = d*FLATTEN_SIZE + flat_idx;
                 sum += layer2[c][t] * (data_t)fc1_w[w_idx];
                 flat_idx++;
@@ -116,6 +126,7 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
     for (int c = 0; c < NUM_CLASSES; c++) {
         data_t sum = (data_t)fc2_b[c];
         for (int d = 0; d < 32; d++) {
+            #pragma HLS PIPELINE II=1
             int w_idx = c*32 + d;
             sum += dense1[d] * (data_t)fc2_w[w_idx];
         }
@@ -137,7 +148,7 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
 
     // Write Result to Stream
     axis_t result_packet;
-    result_packet.data = best_class;
+    result_packet.data = (ap_uint<32>)best_class;
     result_packet.keep = 0xF; 
     result_packet.strb = 0xF;
     result_packet.last = 1;   
