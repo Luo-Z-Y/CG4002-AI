@@ -8,15 +8,15 @@
 // Voice model configuration
 #define VOICE_NUM_MFCC 40
 #define VOICE_NUM_FRAMES 50
-#define VOICE_NUM_CLASSES 3
+#define VOICE_NUM_CLASSES 5   // yes, no, go, unknown, silence
 
-// Conv1: 40 -> 16, pool2 => time 25
-#define VOICE_CONV1_OUT_CH 16
-#define VOICE_CONV1_OUT_T 25
+// DS block 1: pw 40->16, dw(k=3), pool2 => 25
+#define VOICE_B1_CH 16
+#define VOICE_B1_T 25
 
-// Conv2: 16 -> 32, time 25, then global average pool
-#define VOICE_CONV2_OUT_CH 32
-#define VOICE_CONV2_OUT_T 25
+// DS block 2: pw 16->32, dw(k=3), pool2 => 12
+#define VOICE_B2_CH 32
+#define VOICE_B2_T 12
 
 // Fixed-point data type (Q8.8)
 typedef ap_fixed<16, 8, AP_TRN, AP_SAT> data_t;

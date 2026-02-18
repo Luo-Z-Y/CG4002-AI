@@ -15,7 +15,7 @@ import pandas as pd
 XSA_PATH = "voice_cnn_updated.xsa"
 FEATURES_NPY = "voice_X_test.npy"   # expected shape [N, 40, 50]
 LABELS_NPY = "voice_y_test.npy"     # expected shape [N]
-LABELS = ["Class0", "Class1", "Class2"]
+LABELS = ["yes", "no", "go", "unknown", "silence"]
 DMA_TIMEOUT_S = 2.0
 
 
