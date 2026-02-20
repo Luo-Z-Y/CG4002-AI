@@ -6,19 +6,38 @@ Framework path: PyTorch -> Vitis HLS (C++) -> Vivado -> PYNQ (Python)
 
 ## Project Overview
 
-This repository implements a hardware-software co-design for real-time gesture recognition on the Ultra96-V2 platform. The system uses a 1D-CNN for IMU-based gesture classification, with hardware acceleration via FPGA and a Python-based software stack for preprocessing and control. A voice pipeline is also included for training and software-side routing, but voice FPGA deployment is not yet hardware-validated.
+This repository implements a hardware-software co-design for real-time gesture and voice recognition on Ultra96/Ultra96-V2. The deployment path is PyTorch training/export on PS, fixed-point streaming over AXI DMA, and FPGA inference with HLS IP cores integrated in Vivado.
 
-## Current Status (2026-02-18)
+## Target Board and PL Budget
+
+- Board: Ultra96 (96Boards CE) / Ultra96-V2
+- SoC: Zynq UltraScale+ MPSoC ZU3EG A484
+- Programmable Logic (ZU3EG) limits:
+  - LUT: 70,560
+  - FF: 141,120
+  - BRAM: 216
+  - DSP: 360
+
+## Board / Constraint References
+
+- Ultra96 product page (board part and key platform specs)
+- Ultra96-V2 product brief (hardware overview)
+- Avnet Ultra96-PYNQ repository (Vivado/XDC examples)
+- Xilinx IIoT-SPYN Ultra96 constraints examples
+
+## Current Status (2026-02-20)
 
 ### Gesture CNN
-- Status: Active, hardware-integrated, and evaluable on Ultra96
+- Status: Active and hardware-integrated in `dual_cnn.xsa`
 - Input: IMU window `[60, 6]` (`gyro_x/y/z`, `acc_x/y/z`)
+- AXIS input contract (current deployed `dual_cnn.xsa`): `float32` bit pattern in 32-bit AXIS `data`
 - Labels (6): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
 - Evaluation script: `test/gesture_test.py`
 
 ### Voice CNN
-- Status: Dataset + preprocessing + training + HLS + eval script ready; full on-board validation still pending
+- Status: Architecture updated, retrained, and integrated in `dual_cnn.xsa`
 - Input feature shape: MFCC `[40, 50]`
+- AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed into AXIS `data[15:0]`
 - Current dataset snapshot: `data/audio/18022026`
 - Evaluation script: `test/voice_test.py`
 - Voice manifest (`data/audio/18022026/voice_manifest.csv`):
@@ -29,6 +48,64 @@ This repository implements a hardware-software co-design for real-time gesture r
 ### Router
 - Runtime arbitration scaffold: `test/router.py`
 - Selects gesture vs voice core using motion and voice-energy thresholds
+
+## Key Design Decisions
+
+1. Dual-IP architecture (`gesture_cnn` and `voice_cnn` as separate accelerators)
+- Rationale: independent debug/tuning, cleaner Vivado integration, and isolated resource management.
+
+2. Mixed input contracts in current deployed dual overlay
+- Gesture path currently uses float32 AXIS input.
+- Voice path currently uses Q8.8 AXIS input (`data[15:0]`).
+- Rationale: this matches the currently deployed and validated `dual_cnn.xsa`.
+
+3. Quantization for voice
+- Voice quantization is done on PS (Python/NumPy) before DMA.
+- Rationale: reduces PL-side conversion logic and LUT pressure.
+
+4. Explicit 32-bit output class encoding
+- Decision: cast class output to `ap_uint<32>`.
+- Rationale: avoids AXI data-width ambiguity and keeps interface contracts explicit.
+
+## Progress Summary
+
+### Voice IP
+- PS packs MFCC float features to Q8.8 int16 before DMA.
+- PL consumes fixed-point stream directly (no float union conversion).
+- Observed outcome: LUT usage reduced to a board-safe range compared with prior near-limit runs; DSP usage remains moderate; latency remains in few-thousand cycles (tens of microseconds at ~100 MHz).
+
+### Gesture IP
+- Current deployed dual overlay interface reads float32 from AXIS data.
+- Outcome: gesture path is stable on board with current software packing.
+
+### Input Normalization (Z-score)
+- Z-score is used during training in both notebooks.
+- Export step in both notebooks sets `fuse_input_norm=True`, which folds input normalization into `conv1` weights/biases for raw-input inference.
+- Therefore, runtime PS preprocessing for the dual test does not need separate z-score for either model when using those fused exported weights.
+
+### Latest Ultra96 Dual-IP Evidence (2026-02-20)
+Command used:
+```bash
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --gesture-core gesture_cnn_0 \
+  --voice-core voice_cnn_0 \
+  --gesture-dma axi_dma_1 \
+  --voice-dma axi_dma_0 \
+  --mode both \
+  --gesture-pack float32 \
+  --voice-pack q88
+```
+
+Observed results:
+- Gesture accuracy: `92.50%` (120 samples)
+- Voice accuracy: `75.00%` (300 samples)
+- Evidence artifact: `report/evidence_dual/20260220_184325/summary.json`
+
+Why Ultra96 accuracy is slightly lower than notebook accuracy:
+- Hardware path introduces finite precision effects (`ap_fixed<16,8>` arithmetic and Q8.8 input quantization for voice), while notebook training/eval is typically float.
+- PS-PL deployment path includes additional implementation details not present in notebook inference (packing, AXIS ordering, cast/saturation behavior).
+- The board test uses the real deployed overlay and end-to-end DMA/IP execution, so it captures integration noise and quantization mismatch that notebook-only evaluation does not.
 
 ## Repository Structure (Authoritative)
 
@@ -68,7 +145,7 @@ CG4002-AI/
 ## Architecture Summary
 
 ### Hardware
-- HLS IP cores for gesture and voice inference
+- Separate HLS IP cores for gesture and voice inference
 - AXI DMA for PS-PL transfers
 - AXI-Lite control for core start/stop and MMIO interactions
 
@@ -122,11 +199,38 @@ python3 test/router.py \
 ## Progress vs Deliverables
 
 - AI model design: complete for gesture and voice
-- FPGA implementation: complete and evidenced for gesture; voice final board validation pending
+- FPGA implementation: gesture evidenced; voice IP updated and ready for final integrated validation
 - Ultra96 setup and low-level access: implemented in test scripts (`Overlay`, DMA, MMIO)
-- Software implementation and evaluation: complete gesture flow; voice flow implemented and awaiting final hardware evidence
+- Software implementation and evaluation: complete gesture flow; voice flow implemented with fixed-point streaming path
 - Hardware evidence in repo: `report/gesture_cnn_csynth.rpt`, `report/vivado-project-summary.png`
 - Power-management hooks available in `test/gesture_test.py` (`--cpu-governor`, `--pl-clock-mhz`, `--power-w`)
+
+## Evaluation Metrics for Final Report
+
+1. Fit and integration metrics
+- Per-IP LUT/FF/BRAM/DSP and post-integration total (both IPs + DMA + AXI interconnect + control).
+- Keep practical LUT headroom; avoid targeting near-maximum LUT in HLS-only estimates.
+
+2. Timing closure metrics
+- Use post-Vivado WNS as pass/fail:
+  - WNS >= 0: target clock met
+  - WNS < 0: timing violation
+
+3. End-to-end runtime on PYNQ
+- Measure PS preprocessing, DMA send, IP compute, DMA receive, and total inference latency.
+
+4. Accuracy stability across deployment stages
+- Compare:
+  - PyTorch float model
+  - Python-side quantized-input simulation (Q8.8)
+  - FPGA on-board classification
+
+## Remaining Integration Work
+
+1. Complete final Vivado block design with both IPs + DMA(s) + AXI interconnect.
+2. Verify full design utilization against ZU3EG PL limits.
+3. Close timing at target PL clock (non-negative WNS).
+4. Run end-to-end dual-model PYNQ tests with latency and accuracy evidence capture.
 
 ## Notes
 

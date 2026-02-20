@@ -1,13 +1,11 @@
 #include <iostream>
 #include "voice_cnn.h"
 
-static unsigned int float_to_bits(float f) {
-    union {
-        unsigned int i;
-        float f;
-    } cvt;
-    cvt.f = f;
-    return cvt.i;
+static unsigned int q88_to_u32(float f) {
+    int q = static_cast<int>(f * 256.0f + (f >= 0.0f ? 0.5f : -0.5f));
+    if (q > 32767) q = 32767;
+    if (q < -32768) q = -32768;
+    return static_cast<unsigned int>(static_cast<unsigned short>(q));
 }
 
 int main() {
@@ -22,7 +20,7 @@ int main() {
         for (int c = 0; c < VOICE_NUM_MFCC; c++) {
             float v = 0.01f * static_cast<float>(t + c);
             axis_t pkt;
-            pkt.data = float_to_bits(v);
+            pkt.data = q88_to_u32(v);
             pkt.keep = 0xF;
             pkt.strb = 0xF;
             pkt.last = (t == VOICE_NUM_FRAMES - 1 && c == VOICE_NUM_MFCC - 1) ? 1 : 0;

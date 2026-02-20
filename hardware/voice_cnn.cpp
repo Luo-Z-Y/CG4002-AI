@@ -2,58 +2,89 @@
 #include "voice_cnn_weights.h"
 #include <ap_int.h>
 
+// ReLU
 static inline data_t relu(data_t x) {
     return (x > (data_t)0) ? x : (data_t)0;
 }
 
+// Interpret AXIS[15:0] as signed Q8.8 and bit-cast into data_t (ap_fixed<16,8>).
+// This avoids float->fixed conversion hardware entirely (big LUT saver).
+static inline data_t q88_from_axis(ap_uint<32> w) {
+    ap_int<16> raw = (ap_int<16>)w.range(15, 0);
+    data_t v;
+    v.range(15, 0) = raw;   // bit-level assignment into ap_fixed storage
+    return v;
+}
+
+// Force multiply into DSP (trades DSP for LUT reduction)
+static inline data_t mul_dsp(data_t a, data_t b) {
+    data_t p = a * b;
+#pragma HLS bind_op variable=p op=mul impl=dsp
+    return p;
+}
+
 void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) {
-    #pragma HLS INTERFACE axis port=in_stream
-    #pragma HLS INTERFACE axis port=out_stream
-    #pragma HLS INTERFACE s_axilite port=return
+#pragma HLS INTERFACE axis port=in_stream
+#pragma HLS INTERFACE axis port=out_stream
+#pragma HLS INTERFACE s_axilite port=return
 
-    // Start conservative to reduce DSP.
-    // (You can re-add small cyclic partition later if DSP is comfortably low.)
-    // #pragma HLS ARRAY_PARTITION variable=conv1_w cyclic factor=2 dim=1
-    // #pragma HLS ARRAY_PARTITION variable=conv2_w cyclic factor=2 dim=1
-    // #pragma HLS ARRAY_PARTITION variable=fc_w    cyclic factor=2 dim=1
+    // Keep DSP under control if needed (you can raise/lower later)
+#pragma HLS ALLOCATION operation instances=mul limit=240
 
-    // ============================================================
-    // 1) Read stream directly into padded input buffer
-    // input_pad[c][0] and input_pad[c][VOICE_NUM_FRAMES+1] are 0.
-    // input_pad shape: [40][52] if VOICE_NUM_FRAMES=50
-    // ============================================================
+    // --------------------------------------------------------------------
+    // Force large constant weights into BRAM-backed ROM (reduces LUT ROM).
+    // If your tool complains about BIND_STORAGE, tell me your exact error
+    // and I’ll swap to RESOURCE pragmas for your Vitis HLS build.
+    // --------------------------------------------------------------------
+#pragma HLS BIND_STORAGE variable=conv1_w type=rom_2p impl=bram
+#pragma HLS BIND_STORAGE variable=conv2_w type=rom_2p impl=bram
+#pragma HLS BIND_STORAGE variable=fc_w    type=rom_2p impl=bram
+#pragma HLS BIND_STORAGE variable=conv1_b type=rom_1p impl=bram
+#pragma HLS BIND_STORAGE variable=conv2_b type=rom_1p impl=bram
+#pragma HLS BIND_STORAGE variable=fc_b    type=rom_1p impl=bram
+
+    // --------------------------------------------------------------------
+    // Buffers: also put these in BRAM RAM to avoid huge register/LUT usage.
+    // --------------------------------------------------------------------
     data_t input_pad[VOICE_NUM_MFCC][VOICE_NUM_FRAMES + 2];
-    // Do NOT partition initially; partitioning can increase DSP.
-    // #pragma HLS ARRAY_PARTITION variable=input_pad cyclic factor=2 dim=1
+#pragma HLS BIND_STORAGE variable=input_pad type=ram_2p impl=bram
 
-    // Set padding to 0
+    data_t b1_out[VOICE_B1_CH][VOICE_B1_T];
+#pragma HLS BIND_STORAGE variable=b1_out type=ram_2p impl=bram
+
+    // padded b1 to remove boundary checks in conv2 (saves control/mux LUT)
+    data_t b1_pad[VOICE_B1_CH][VOICE_B1_T + 2];
+#pragma HLS BIND_STORAGE variable=b1_pad type=ram_2p impl=bram
+
+    data_t b2_out[VOICE_B2_CH][VOICE_B2_T];
+#pragma HLS BIND_STORAGE variable=b2_out type=ram_2p impl=bram
+
+    // ============================================================
+    // 1) Initialise padding and read input samples (Q8.8 int16 packed in AXIS)
+    // input_pad[c][0] and input_pad[c][VOICE_NUM_FRAMES+1] = 0
+    // ============================================================
     for (int c = 0; c < VOICE_NUM_MFCC; c++) {
-        #pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=1
         input_pad[c][0] = (data_t)0;
         input_pad[c][VOICE_NUM_FRAMES + 1] = (data_t)0;
     }
 
-    // Read [t][c] from stream, store at [c][t+1]
+    // Stream order expected: [t][c] (time-major)
     for (int t = 0; t < VOICE_NUM_FRAMES; t++) {
         for (int c = 0; c < VOICE_NUM_MFCC; c++) {
-            #pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=1
             axis_t pkt = in_stream.read();
-            union { unsigned int i; float f; } cvt;
-            cvt.i = (unsigned int)pkt.data;
-            input_pad[c][t + 1] = (data_t)cvt.f;
+            input_pad[c][t + 1] = q88_from_axis(pkt.data);
         }
     }
 
     // ============================================================
-    // 2) Block1: Conv k=3 (40->16) + ReLU + MaxPool2 => [16,25]
-    // Uses padded input so no boundary if inside MAC.
+    // 2) Block1: Conv k=3 (40 -> VOICE_B1_CH) + ReLU + MaxPool2 => [VOICE_B1_CH, 25]
+    // padding=1 handled via input_pad (no boundary checks)
     // ============================================================
-    data_t b1_out[VOICE_B1_CH][VOICE_B1_T];
-    // #pragma HLS ARRAY_PARTITION variable=b1_out cyclic factor=2 dim=1  // optional
-
     for (int o = 0; o < VOICE_B1_CH; o++) {
         for (int t = 0; t < VOICE_B1_T; t++) {
-            #pragma HLS PIPELINE II=2
+#pragma HLS PIPELINE II=4
 
             data_t max_val = (data_t)-128;
 
@@ -64,9 +95,10 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
                 data_t s = conv1_b[o];
 
                 for (int i = 0; i < VOICE_NUM_MFCC; i++) {
+                    // k=0..2 corresponds to offsets -1,0,+1
                     for (int k = 0; k < 3; k++) {
                         int w_idx = o * (VOICE_NUM_MFCC * 3) + i * 3 + k;
-                        s += input_pad[i][pad_t + (k - 1)] * conv1_w[w_idx];
+                        s += mul_dsp(input_pad[i][pad_t + (k - 1)], conv1_w[w_idx]);
                     }
                 }
 
@@ -79,42 +111,46 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     }
 
     // ============================================================
-    // 3) Block2: Conv k=3 (16->32) + ReLU + MaxPool2 => [32,12]
-    // Here we keep a small boundary check (cheap) instead of a full b1_pad + copy.
+    // 3) Build padded b1 for conv2 to remove boundary checks
+    // b1_pad[c][0] = b1_pad[c][VOICE_B1_T+1] = 0, copy to [t+1]
     // ============================================================
-    data_t b2_out[VOICE_B2_CH][VOICE_B2_T];
-
-    for (int o = 0; o < VOICE_B2_CH; o++) {
-        for (int t = 0; t < VOICE_B2_T; t++) {
-            #pragma HLS PIPELINE II=2
-
-            data_t max_val = (data_t)-128;
-
-            for (int p = 0; p < 2; p++) {
-                int curr_t = t * 2 + p;  // 0..23
-
-                data_t s = conv2_b[o];
-
-                for (int i = 0; i < VOICE_B1_CH; i++) {
-                    for (int k = 0; k < 3; k++) {
-                        int in_t = curr_t + k - 1; // -1..24
-                        if (in_t >= 0 && in_t < VOICE_B1_T) {
-                            int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
-                            s += b1_out[i][in_t] * conv2_w[w_idx];
-                        }
-                    }
-                }
-
-                data_t v = relu(s);
-                if (v > max_val) max_val = v;
-            }
-
-            b2_out[o][t] = max_val;
+    for (int c = 0; c < VOICE_B1_CH; c++) {
+#pragma HLS PIPELINE II=1
+        b1_pad[c][0] = (data_t)0;
+        b1_pad[c][VOICE_B1_T + 1] = (data_t)0;
+    }
+    for (int c = 0; c < VOICE_B1_CH; c++) {
+        for (int t = 0; t < VOICE_B1_T; t++) {
+#pragma HLS PIPELINE II=1
+            b1_pad[c][t + 1] = b1_out[c][t];
         }
     }
 
     // ============================================================
-    // 4) Global average pool (no divider)
+    // 4) Block2: Conv k=3 (VOICE_B1_CH -> VOICE_B2_CH) + ReLU => [VOICE_B2_CH, VOICE_B2_T]
+    // VOICE_B2_T should be 25 for your PyTorch AdaptiveAvgPool1d(1) design.
+    // Now no boundary checks because we use b1_pad.
+    // ============================================================
+    for (int o = 0; o < VOICE_B2_CH; o++) {
+        for (int t = 0; t < VOICE_B2_T; t++) {
+#pragma HLS PIPELINE II=4
+
+            int pad_t = t + 1; // centre index in padded buffer
+            data_t s = conv2_b[o];
+
+            for (int i = 0; i < VOICE_B1_CH; i++) {
+                for (int k = 0; k < 3; k++) {
+                    int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
+                    s += mul_dsp(b1_pad[i][pad_t + (k - 1)], conv2_w[w_idx]);
+                }
+            }
+
+            b2_out[o][t] = relu(s);
+        }
+    }
+
+    // ============================================================
+    // 5) Global average pool over T=VOICE_B2_T (25)
     // ============================================================
     data_t pooled[VOICE_B2_CH];
     const data_t invT = (data_t)(1.0f / VOICE_B2_T);
@@ -122,27 +158,29 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     for (int c = 0; c < VOICE_B2_CH; c++) {
         data_t s = (data_t)0;
         for (int t = 0; t < VOICE_B2_T; t++) {
-            #pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=1
             s += b2_out[c][t];
         }
         pooled[c] = s * invT;
     }
 
     // ============================================================
-    // 5) FC
+    // 6) FC: [VOICE_B2_CH] -> [VOICE_NUM_CLASSES]
     // ============================================================
     data_t logits[VOICE_NUM_CLASSES];
 
     for (int c = 0; c < VOICE_NUM_CLASSES; c++) {
         data_t s = fc_b[c];
         for (int i = 0; i < VOICE_B2_CH; i++) {
-            #pragma HLS PIPELINE II=1
-            s += pooled[i] * fc_w[c * VOICE_B2_CH + i];
+#pragma HLS PIPELINE II=1
+            s += mul_dsp(pooled[i], fc_w[c * VOICE_B2_CH + i]);
         }
         logits[c] = s;
     }
 
-    // Argmax
+    // ============================================================
+    // 7) Argmax + output
+    // ============================================================
     int best_class = 0;
     data_t best_score = logits[0];
     for (int c = 1; c < VOICE_NUM_CLASSES; c++) {

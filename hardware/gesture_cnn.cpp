@@ -7,6 +7,14 @@ data_t relu(data_t x) {
     return (x > 0) ? x : (data_t)0;
 }
 
+// Interpret AXIS bits [15:0] as signed Q8.8 (int16) and bit-cast into data_t.
+static inline data_t q88_from_axis(ap_uint<32> w) {
+    ap_int<16> raw = (ap_int<16>)w.range(15, 0);
+    data_t v;
+    v.range(15, 0) = raw;
+    return v;
+}
+
 void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) {
     #pragma HLS INTERFACE axis port=in_stream
     #pragma HLS INTERFACE axis port=out_stream
@@ -28,11 +36,8 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
             #pragma HLS PIPELINE II=1
             axis_t temp = in_stream.read();
             
-            // Interpret raw float bits -> Cast to Fixed Point
-            union { unsigned int i; float f; } converter;
-            converter.i = temp.data;
-            
-            input_buffer[c][t] = (data_t)converter.f; 
+            // Each AXIS word carries signed Q8.8 in data[15:0].
+            input_buffer[c][t] = q88_from_axis(temp.data);
         }
     }
 
