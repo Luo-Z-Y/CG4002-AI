@@ -25,21 +25,23 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Avnet Ultra96-PYNQ repository (Vivado/XDC examples)
 - Xilinx IIoT-SPYN Ultra96 constraints examples
 
-## Current Status (2026-02-20)
+## Current Status (2026-02-25)
 
 ### Gesture CNN
 - Status: Active and hardware-integrated in `dual_cnn.xsa`
 - Input: IMU window `[60, 6]` (`gyro_x/y/z`, `acc_x/y/z`)
-- AXIS input contract (current deployed `dual_cnn.xsa`): `float32` bit pattern in 32-bit AXIS `data`
+- AXIS input contract (current deployed `dual_cnn.xsa`): supports both `float32` and signed `Q8.8` packed in AXIS `data[15:0]` via `--gesture-pack`
 - Labels (6): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
-- Evaluation script: `test/gesture_test.py`
+- Evaluation script: `test/dual_cnn_test.py`
 
 ### Voice CNN
 - Status: Architecture updated, retrained, and integrated in `dual_cnn.xsa`
 - Input feature shape: MFCC `[40, 50]`
 - AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed into AXIS `data[15:0]`
-- Current dataset snapshot: `data/audio/18022026`
-- Evaluation script: `test/voice_test.py`
+- Current dataset snapshots:
+  - Active training/deployment labels (`yes`, `no`, `go`): `data/audio/18022026`
+  - New downloaded candidate set (`marvin`, `sheila`, `visual`): `data/audio/25022026`
+- Evaluation script: `test/dual_cnn_test.py`
 - Voice labels (current 3-class implementation): `go`, `no`, `yes`
 - Future plan: migrate to real Pokémon labels (for first iteration: `pikachu`, `charizard`, `babusaur`) after dataset refresh and retraining.
 
@@ -84,7 +86,7 @@ This repository implements a hardware-software co-design for real-time gesture a
 ### Latest Ultra96 Dual-IP Evidence (2026-02-20)
 Command used:
 ```bash
-python3 dual_cnn_test.py \
+python3 test/dual_cnn_test.py \
   --xsa-path dual_cnn.xsa \
   --gesture-core gesture_cnn_0 \
   --voice-core voice_cnn_0 \
@@ -99,6 +101,12 @@ Observed results:
 - Gesture accuracy: `92.50%` (120 samples)
 - Voice accuracy: `75.00%` (300 samples)
 - Evidence artifact: `report/evidence_dual/20260220_184325/summary.json`
+
+### Latest Voice Software Test (2026-02-25)
+- Dataset: `yes/no/go`, split before augmentation to avoid leakage
+- Test accuracy (float): `77.28%`
+- Test accuracy (Q8.8-sim): `77.28%`
+- Test set size: `1800` samples (`600` per class)
 
 Why Ultra96 accuracy is slightly lower than notebook accuracy:
 - Hardware path introduces finite precision effects (`ap_fixed<16,8>` arithmetic and Q8.8 input quantization for voice), while notebook training/eval is typically float.
@@ -164,21 +172,25 @@ CG4002-AI/
 ### 2. Gesture Evaluation (Ultra96)
 
 ```bash
-python3 test/gesture_test.py \
-  --xsa-path hardware/gesture_cnn.xsa \
-  --csv-path data/gesture/13022026/augmented_imudata.csv \
-  --save-dir report/evidence_gesture \
+python3 test/dual_cnn_test.py \
+  --xsa-path hardware/vivado/dual_cnn.xsa \
+  --mode gesture \
+  --gesture-csv data/test-data/augmented_imudata_test.csv \
+  --gesture-pack q88 \
+  --save-dir report/evidence_dual \
   --tag baseline
 ```
 
 ### 3. Voice Evaluation (Ultra96)
 
 ```bash
-python3 test/voice_test.py \
-  --xsa-path <voice_overlay.xsa> \
-  --features-npy data/audio/18022026/voice_X_test.npy \
-  --labels-npy data/audio/18022026/voice_y_test.npy \
-  --save-dir report/evidence_voice \
+python3 test/dual_cnn_test.py \
+  --xsa-path hardware/vivado/dual_cnn.xsa \
+  --mode voice \
+  --voice-features data/test-data/voice_X_test.npy \
+  --voice-labels data/test-data/voice_y_test.npy \
+  --voice-pack q88 \
+  --save-dir report/evidence_dual \
   --tag baseline
 ```
 
