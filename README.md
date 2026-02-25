@@ -40,10 +40,8 @@ This repository implements a hardware-software co-design for real-time gesture a
 - AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed into AXIS `data[15:0]`
 - Current dataset snapshot: `data/audio/18022026`
 - Evaluation script: `test/voice_test.py`
-- Voice manifest (`data/audio/18022026/voice_manifest.csv`):
-  - `go`: 1000
-  - `no`: 1000
-  - `yes`: 1000
+- Voice labels (current 3-class implementation): `go`, `no`, `yes`
+- Future plan: migrate to real Pokémon labels (for first iteration: `pikachu`, `charizard`, `babusaur`) after dataset refresh and retraining.
 
 ### Router
 - Runtime arbitration scaffold: `test/router.py`

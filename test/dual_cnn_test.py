@@ -36,9 +36,13 @@ GESTURE_STD = np.array(
 
 @dataclass
 class EvalResult:
+    # Number of evaluated samples.
     total: int
+    # Number of correct predictions.
     correct: int
+    # Confusion matrix [true, pred].
     cm: np.ndarray
+    # Per-sample end-to-end latency in ms (start core + DMA send/recv).
     lat_ms: List[float]
 
     @property
@@ -48,17 +52,21 @@ class EvalResult:
 
 def q88_pack_u32(x: np.ndarray) -> np.ndarray:
     """Pack float array to signed Q8.8 in low 16 bits of uint32 AXIS words."""
+    # Clip to representable Q8.8 range, then scale by 2^8.
     q = np.round(np.clip(x, -128.0, 127.99609375) * 256.0).astype(np.int32)
+    # Keep only low 16 bits (two's complement int16 payload in AXIS data[15:0]).
     q16 = (q & 0xFFFF).astype(np.uint32)
     return q16
 
 
 def reset_dma(dma) -> None:
+    # Reset both TX (MM2S) and RX (S2MM) channels.
     for ch in [dma.sendchannel, dma.recvchannel]:
         mmio = ch._mmio
         off = ch._offset
         mmio.write(off + 0x00, 0x4)  # reset
     time.sleep(0.01)
+    # Put both channels back into run state.
     for ch in [dma.sendchannel, dma.recvchannel]:
         mmio = ch._mmio
         off = ch._offset
@@ -67,8 +75,10 @@ def reset_dma(dma) -> None:
 
 
 def run_dma(dma, in_buf, out_buf, timeout_s: float) -> None:
+    # Ensure input is committed to memory and output cache is invalidated.
     in_buf.flush()
     out_buf.invalidate()
+    # Start receive before send to reduce backpressure/stall risk.
     dma.recvchannel.transfer(out_buf)
     dma.sendchannel.transfer(in_buf)
 
@@ -82,18 +92,22 @@ def run_dma(dma, in_buf, out_buf, timeout_s: float) -> None:
 
     dma.sendchannel.wait()
     dma.recvchannel.wait()
+    # Refresh output buffer view on CPU side.
     out_buf.invalidate()
 
 
 def stop_core(core) -> None:
+    # HLS control register at 0x00: clear ap_start/auto_restart.
     core.write(0x00, 0x00)
 
 
 def start_core(core) -> None:
+    # HLS control register at 0x00: single-shot ap_start=1.
     core.write(0x00, 0x01)
 
 
 def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, np.ndarray]:
+    # Group rows by measurement_id; each valid group should form one [60,6] window.
     groups: Dict[int, List[Tuple[int, np.ndarray, int]]] = {}
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
@@ -114,6 +128,7 @@ def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, n
                     dtype=np.float32,
                 )
             except Exception:
+                # Skip malformed rows instead of aborting the full run.
                 continue
             groups.setdefault(mid, []).append((sid, feat, y))
 
@@ -121,10 +136,13 @@ def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, n
     labels = []
     for mid in sorted(groups.keys()):
         seq = groups[mid]
+        # Keep only complete 60-step windows.
         if len(seq) != 60:
             continue
+        # Sort by sequence_id so temporal order is deterministic.
         seq_sorted = sorted(seq, key=lambda x: x[0])
         ids = [s for s, _, _ in seq_sorted]
+        # Require unique sequence_id values to avoid duplicated timesteps.
         if len(set(ids)) != 60:
             continue
         y = seq_sorted[0][2]
@@ -142,6 +160,7 @@ def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, n
 
 
 def pretty_cm(cm: np.ndarray, labels: Sequence[str]) -> None:
+    # Compact text-table confusion matrix printer for terminal logs.
     header = "true\\pred | " + " ".join([f"{l[:6]:>6}" for l in labels])
     print(header)
     print("-" * len(header))
@@ -159,6 +178,7 @@ def run_gesture_eval(
     gesture_pack: str,
 ) -> EvalResult:
     n = len(X)
+    # Rows=true class, cols=predicted class.
     cm = np.zeros((len(GESTURE_LABELS), len(GESTURE_LABELS)), dtype=np.int32)
     lat_ms: List[float] = []
     correct = 0
@@ -171,7 +191,9 @@ def run_gesture_eval(
 
     try:
         for i in range(n):
+            # Runtime normalization that matches training scaler statistics.
             x = (X[i] - GESTURE_MEAN.reshape(1, 6)) / (GESTURE_STD.reshape(1, 6) + 1e-6)
+            # Flatten in [time][channel] order, matching HLS stream loop order.
             flat = x.reshape(-1).astype(np.float32)  # [t][c] flatten
 
             if gesture_pack == "q88":
@@ -180,12 +202,14 @@ def run_gesture_eval(
                 payload = flat
             np.copyto(in_buffer, payload)
 
+            # End-to-end timing includes control write + DMA transfers.
             t0 = time.time()
             start_core(gesture_core)
             run_dma(gesture_dma, in_buffer, out_buffer, timeout_s=timeout_s)
             lat_ms.append((time.time() - t0) * 1000.0)
             pred = int(out_buffer[0])
 
+            # Defensive fallback if hardware returns invalid class id.
             if pred < 0 or pred >= len(GESTURE_LABELS):
                 pred = 0
             yt = int(y[i])
@@ -226,8 +250,10 @@ def run_voice_eval(
         for i in range(n):
             feat = X[i].astype(np.float32)  # [40, 50]
             if voice_order == "tc":
+                # HLS expects time-major stream [t][c].
                 flat = feat.T.reshape(-1).astype(np.float32)  # [t][c]
             else:
+                # Optional fallback for overlays that consume channel-major stream.
                 flat = feat.reshape(-1).astype(np.float32)  # [c][t]
 
             if voice_pack == "q88":
@@ -245,6 +271,7 @@ def run_voice_eval(
             if pred < 0 or pred >= n_classes:
                 pred = 0
             yt = int(y[i])
+            # Ignore samples whose labels are outside configured class range.
             if yt < 0 or yt >= n_classes:
                 continue
             cm[yt, pred] += 1
@@ -260,6 +287,7 @@ def run_voice_eval(
 
 
 def summarize(result: EvalResult) -> Dict[str, float]:
+    # Build JSON-friendly aggregate metrics used by the final report.
     lat = np.asarray(result.lat_ms, dtype=np.float64)
     return {
         "total": int(result.total),
@@ -290,8 +318,10 @@ def parse_args():
     p.add_argument("--timeout-s", type=float, default=2.0)
 
     p.add_argument("--mode", choices=["gesture", "voice", "both"], default="both")
+    # Packing mode controls how PS encodes input stream payload for each core.
     p.add_argument("--gesture-pack", choices=["q88", "float32"], default="q88")
     p.add_argument("--voice-pack", choices=["float32", "q88"], default="q88")
+    # Voice feature flattening order: "tc" matches current HLS implementation.
     p.add_argument("--voice-order", choices=["tc", "ct"], default="tc")
 
     p.add_argument("--save-dir", default=DEFAULT_OUTDIR)
@@ -310,6 +340,7 @@ def main() -> None:
 
     print(f"Loading overlay: {args.xsa_path}")
     overlay = Overlay(args.xsa_path)
+    # Helpful for debugging name mismatches in CLI arguments.
     print("Available IP blocks:", ", ".join(sorted(overlay.ip_dict.keys())))
 
     gesture_core = getattr(overlay, args.gesture_core)
@@ -317,10 +348,12 @@ def main() -> None:
     gesture_dma = getattr(overlay, args.gesture_dma)
     voice_dma = getattr(overlay, args.voice_dma)
 
+    # Start from known clean state.
     stop_core(gesture_core)
     stop_core(voice_core)
 
     reset_dma(gesture_dma)
+    # Avoid double-reset if both names point to the same DMA object.
     if voice_dma is not gesture_dma:
         reset_dma(voice_dma)
 
@@ -349,6 +382,7 @@ def main() -> None:
                 "summary": gsum,
                 "confusion_matrix": gres.cm.tolist(),
             }
+            # Stop unused core before moving to next workload.
             stop_core(gesture_core)
 
         if args.mode in ("voice", "both"):
@@ -379,10 +413,12 @@ def main() -> None:
             stop_core(voice_core)
 
     finally:
+        # Always force-stop cores on exit/error to avoid stale running state.
         stop_core(gesture_core)
         stop_core(voice_core)
 
     summary_path = out_dir / "summary.json"
+    # Store one artifact containing config + metrics + confusion matrices.
     summary_path.write_text(json.dumps(report, indent=2))
     print(f"\nSaved report: {summary_path}")
 
