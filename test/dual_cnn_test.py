@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from pynq import Overlay, allocate
@@ -15,20 +15,22 @@ from pynq import Overlay, allocate
 # Defaults for your current repo layout.
 DEFAULT_XSA = "dual_cnn.xsa"
 DEFAULT_GESTURE_CSV = "augmented_imudata_test.csv"
+DEFAULT_GESTURE_X = "gesture_X_test.npy"
+DEFAULT_GESTURE_Y = "gesture_y_test.npy"
 DEFAULT_VOICE_X = "voice_X_test.npy"
 DEFAULT_VOICE_Y = "voice_y_test.npy"
 DEFAULT_OUTDIR = "report/evidence_dual"
 
 
-GESTURE_LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
+DEFAULT_GESTURE_LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
 VOICE_LABELS = ["yes", "no", "go"]
 
 # Gesture scaler constants
-GESTURE_MEAN = np.array(
+DEFAULT_GESTURE_MEAN = np.array(
     [-0.79198196, -0.89734741, -1.85433716, -0.04240223, -0.00923926, -0.00578469],
     dtype=np.float32,
 )
-GESTURE_STD = np.array(
+DEFAULT_GESTURE_STD = np.array(
     [55.806826, 103.93487478, 99.69469418, 1.1262504, 1.12243429, 1.03791274],
     dtype=np.float32,
 )
@@ -106,7 +108,7 @@ def start_core(core) -> None:
     core.write(0x00, 0x01)
 
 
-def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, np.ndarray]:
+def read_gesture_windows(csv_path: str, max_samples: int, num_classes: int) -> Tuple[np.ndarray, np.ndarray]:
     # Group rows by measurement_id; each valid group should form one [60,6] window.
     groups: Dict[int, List[Tuple[int, np.ndarray, int]]] = {}
     with open(csv_path, "r", newline="") as f:
@@ -146,7 +148,7 @@ def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, n
         if len(set(ids)) != 60:
             continue
         y = seq_sorted[0][2]
-        if y < 0 or y >= len(GESTURE_LABELS):
+        if y < 0 or y >= num_classes:
             continue
         x = np.stack([v for _, v, _ in seq_sorted], axis=0)  # [60, 6]
         windows.append(x)
@@ -159,6 +161,42 @@ def read_gesture_windows(csv_path: str, max_samples: int) -> Tuple[np.ndarray, n
     return np.stack(windows).astype(np.float32), np.asarray(labels, dtype=np.int64)
 
 
+def read_gesture_npy(
+    features_path: str,
+    labels_path: str,
+    max_samples: int,
+    num_classes: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Load gesture windows from npy files. Supports [N,60,6] or [N,6,60] feature layouts."""
+    X = np.load(features_path).astype(np.float32)
+    y = np.load(labels_path).astype(np.int64).reshape(-1)
+
+    if X.ndim != 3:
+        raise ValueError(f"Gesture npy must be rank-3, got shape {X.shape}")
+
+    # Canonical internal layout is [N,60,6].
+    if X.shape[1:] == (60, 6):
+        Xw = X
+    elif X.shape[1:] == (6, 60):
+        Xw = np.transpose(X, (0, 2, 1)).astype(np.float32)
+    else:
+        raise ValueError(f"Gesture npy shape must be [N,60,6] or [N,6,60], got {X.shape}")
+
+    n = min(len(Xw), len(y))
+    if max_samples > 0:
+        n = min(n, max_samples)
+    Xw = Xw[:n]
+    y = y[:n]
+
+    keep = (y >= 0) & (y < num_classes)
+    Xw = Xw[keep]
+    y = y[keep]
+
+    if len(Xw) == 0:
+        raise RuntimeError("No valid gesture samples after label filtering.")
+    return Xw, y
+
+
 def pretty_cm(cm: np.ndarray, labels: Sequence[str]) -> None:
     # Compact text-table confusion matrix printer for terminal logs.
     header = "true\\pred | " + " ".join([f"{l[:6]:>6}" for l in labels])
@@ -169,6 +207,85 @@ def pretty_cm(cm: np.ndarray, labels: Sequence[str]) -> None:
         print(f"{label[:9]:>9} | {row}")
 
 
+def load_gesture_scaler(mean_npy: Optional[str], std_npy: Optional[str]) -> Tuple[np.ndarray, np.ndarray]:
+    """Load gesture normalization stats; fallback to legacy defaults if not provided."""
+    if bool(mean_npy) != bool(std_npy):
+        raise ValueError("Provide both --gesture-mean-npy and --gesture-std-npy, or neither.")
+    if not mean_npy:
+        return DEFAULT_GESTURE_MEAN.copy(), DEFAULT_GESTURE_STD.copy()
+
+    mean = np.load(mean_npy).astype(np.float32).reshape(-1)
+    std = np.load(std_npy).astype(np.float32).reshape(-1)
+    if mean.size != 6 or std.size != 6:
+        raise ValueError(f"Expected gesture mean/std length 6, got {mean.size} and {std.size}")
+    if np.any(std == 0):
+        raise ValueError("Gesture std contains zero; cannot normalize safely.")
+    return mean, std
+
+
+def infer_gesture_labels_from_csv(csv_path: str) -> Dict[int, str]:
+    """Infer label names from gesture CSV columns {label_id, label} if available."""
+    mapping: Dict[int, str] = {}
+    if not Path(csv_path).exists():
+        return mapping
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if "label_id" not in row:
+                continue
+            try:
+                lid = int(float(row["label_id"]))
+            except Exception:
+                continue
+            name = str(row.get("label", "")).strip()
+            if name:
+                mapping.setdefault(lid, name)
+    return mapping
+
+
+def load_gesture_labels(
+    csv_path: str,
+    labels_file: Optional[str],
+    num_classes: Optional[int],
+) -> List[str]:
+    """
+    Resolve gesture label names in priority order:
+    1) --gesture-labels-file (one label per line, index = line number)
+    2) inferred from CSV (label_id + label)
+    3) legacy defaults
+    """
+    labels: List[str] = []
+
+    if labels_file:
+        with open(labels_file, "r", encoding="utf-8") as f:
+            labels = [ln.strip() for ln in f if ln.strip()]
+
+    if not labels:
+        inferred = infer_gesture_labels_from_csv(csv_path)
+        if inferred:
+            max_id = max(inferred.keys())
+            labels = [f"class_{i}" for i in range(max_id + 1)]
+            for k, v in inferred.items():
+                if 0 <= k < len(labels):
+                    labels[k] = v
+
+    if not labels:
+        if num_classes is not None and num_classes > 0:
+            labels = [f"class_{i}" for i in range(num_classes)]
+        else:
+            labels = list(DEFAULT_GESTURE_LABELS)
+
+    if num_classes is not None:
+        if num_classes <= 0:
+            raise ValueError("--gesture-num-classes must be > 0")
+        if len(labels) < num_classes:
+            labels.extend([f"class_{i}" for i in range(len(labels), num_classes)])
+        elif len(labels) > num_classes:
+            labels = labels[:num_classes]
+
+    return labels
+
+
 def run_gesture_eval(
     gesture_core,
     gesture_dma,
@@ -176,10 +293,14 @@ def run_gesture_eval(
     y: np.ndarray,
     timeout_s: float,
     gesture_pack: str,
+    num_classes: int,
+    norm_mode: str,
+    gesture_mean: Optional[np.ndarray] = None,
+    gesture_std: Optional[np.ndarray] = None,
 ) -> EvalResult:
     n = len(X)
     # Rows=true class, cols=predicted class.
-    cm = np.zeros((len(GESTURE_LABELS), len(GESTURE_LABELS)), dtype=np.int32)
+    cm = np.zeros((num_classes, num_classes), dtype=np.int32)
     lat_ms: List[float] = []
     correct = 0
 
@@ -191,8 +312,13 @@ def run_gesture_eval(
 
     try:
         for i in range(n):
-            # Runtime normalization that matches training scaler statistics.
-            x = (X[i] - GESTURE_MEAN.reshape(1, 6)) / (GESTURE_STD.reshape(1, 6) + 1e-6)
+            # With fused input normalization in conv1, use raw inputs (norm_mode=none).
+            if norm_mode == "runtime":
+                if gesture_mean is None or gesture_std is None:
+                    raise ValueError("runtime norm requested but gesture_mean/std are not provided")
+                x = (X[i] - gesture_mean.reshape(1, 6)) / (gesture_std.reshape(1, 6) + 1e-6)
+            else:
+                x = X[i]
             # Flatten in [time][channel] order, matching HLS stream loop order.
             flat = x.reshape(-1).astype(np.float32)  # [t][c] flatten
 
@@ -210,7 +336,7 @@ def run_gesture_eval(
             pred = int(out_buffer[0])
 
             # Defensive fallback if hardware returns invalid class id.
-            if pred < 0 or pred >= len(GESTURE_LABELS):
+            if pred < 0 or pred >= num_classes:
                 pred = 0
             yt = int(y[i])
             cm[yt, pred] += 1
@@ -311,6 +437,15 @@ def parse_args():
     p.add_argument("--voice-dma", default="axi_dma_voice")
 
     p.add_argument("--gesture-csv", default=DEFAULT_GESTURE_CSV)
+    p.add_argument("--gesture-features", default=None)
+    p.add_argument("--gesture-labels", default=None)
+    # Public-dataset mode (active): load scaler and label metadata from files when provided.
+    # FUTURE WORK: if you return fully to fixed internal dataset semantics, these can be hardcoded.
+    p.add_argument("--gesture-mean-npy", default=None)
+    p.add_argument("--gesture-std-npy", default=None)
+    p.add_argument("--gesture-labels-file", default=None)
+    p.add_argument("--gesture-num-classes", type=int, default=None)
+    p.add_argument("--gesture-norm", choices=["none", "runtime"], default="none")
     p.add_argument("--voice-features", default=DEFAULT_VOICE_X)
     p.add_argument("--voice-labels", default=DEFAULT_VOICE_Y)
     p.add_argument("--gesture-max-samples", type=int, default=120)
@@ -365,7 +500,32 @@ def main() -> None:
 
     try:
         if args.mode in ("gesture", "both"):
-            Xg, yg = read_gesture_windows(args.gesture_csv, max_samples=args.gesture_max_samples)
+            if bool(args.gesture_features) != bool(args.gesture_labels):
+                raise ValueError("Provide both --gesture-features and --gesture-labels, or neither.")
+            gesture_labels = load_gesture_labels(
+                csv_path=args.gesture_csv,
+                labels_file=args.gesture_labels_file,
+                num_classes=args.gesture_num_classes,
+            )
+            num_gesture_classes = len(gesture_labels)
+            gesture_mean = None
+            gesture_std = None
+            if args.gesture_norm == "runtime":
+                gesture_mean, gesture_std = load_gesture_scaler(args.gesture_mean_npy, args.gesture_std_npy)
+
+            if args.gesture_features and args.gesture_labels:
+                Xg, yg = read_gesture_npy(
+                    features_path=args.gesture_features,
+                    labels_path=args.gesture_labels,
+                    max_samples=args.gesture_max_samples,
+                    num_classes=num_gesture_classes,
+                )
+            else:
+                Xg, yg = read_gesture_windows(
+                    args.gesture_csv,
+                    max_samples=args.gesture_max_samples,
+                    num_classes=num_gesture_classes,
+                )
             print(f"\nRunning gesture test: {len(Xg)} samples")
             gres = run_gesture_eval(
                 gesture_core=gesture_core,
@@ -374,12 +534,17 @@ def main() -> None:
                 y=yg,
                 timeout_s=args.timeout_s,
                 gesture_pack=args.gesture_pack,
+                num_classes=num_gesture_classes,
+                norm_mode=args.gesture_norm,
+                gesture_mean=gesture_mean,
+                gesture_std=gesture_std,
             )
             gsum = summarize(gres)
             print("Gesture accuracy:", f"{gsum['accuracy_pct']:.2f}%")
-            pretty_cm(gres.cm, GESTURE_LABELS)
+            pretty_cm(gres.cm, gesture_labels)
             report["gesture"] = {
                 "summary": gsum,
+                "labels": gesture_labels,
                 "confusion_matrix": gres.cm.tolist(),
             }
             # Stop unused core before moving to next workload.

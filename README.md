@@ -25,13 +25,21 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Avnet Ultra96-PYNQ repository (Vivado/XDC examples)
 - Xilinx IIoT-SPYN Ultra96 constraints examples
 
-## Current Status (2026-02-25)
+## Current Status (2026-02-27)
 
 ### Gesture CNN
 - Status: Active and hardware-integrated in `dual_cnn.xsa`
 - Input: IMU window `[60, 6]` (`gyro_x/y/z`, `acc_x/y/z`)
 - AXIS input contract (current deployed `dual_cnn.xsa`): supports both `float32` and signed `Q8.8` packed in AXIS `data[15:0]` via `--gesture-pack`
-- Labels (6): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
+- Labels (6, project target semantics): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
+- Training split policy: `train/test` split first, then `train/val`; validation is used for epoch monitoring/model selection, and test is held for final reporting.
+- Current dataset snapshots:
+  - Legacy project gesture set (txt-logs + augmentation): `data/gesture/13022026`
+    - Legacy raw file-stem/class names used in notebook parser: `raise`, `shake3`, `vertical`, `circular`, `horizontal`, `punch`
+  - Public compatibility dataset (UCI HAR converted to repo schema): `data/gesture/27022026`
+    - Format compatibility: converted to `[60, 6]` windows with columns `measurement_id, sequence_id, label_id, gyro_x/y/z, acc_x/y/z`
+    - Current 6-class labels used in this public set: `WALKING`, `WALKING_UPSTAIRS`, `WALKING_DOWNSTAIRS`, `SITTING`, `STANDING`, `LAYING`
+    - Label semantics note: these differ from project target gesture names above.
 - Evaluation script: `test/dual_cnn_test.py`
 
 ### Voice CNN
@@ -58,6 +66,11 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Gesture path currently uses float32 AXIS input.
 - Voice path currently uses Q8.8 AXIS input (`data[15:0]`).
 - Rationale: this matches the currently deployed and validated `dual_cnn.xsa`.
+
+2a. Current HLS IP input expectation (source-of-truth in `hardware/*.cpp`)
+- Both `gesture_cnn` and `voice_cnn` consume signed `Q8.8` packed in AXIS `data[15:0]`.
+- The IPs interpret stream payload via bit-cast (`q88_from_axis`) into `ap_fixed<16,8>` and do fixed-point inference internally.
+- Therefore float-to-fixed quantization/packing is expected on PS before DMA; the IPs do not perform float-input quantization.
 
 3. Quantization for voice
 - Voice quantization is done on PS (Python/NumPy) before DMA.
@@ -175,7 +188,10 @@ CG4002-AI/
 python3 test/dual_cnn_test.py \
   --xsa-path hardware/vivado/dual_cnn.xsa \
   --mode gesture \
-  --gesture-csv data/test-data/augmented_imudata_test.csv \
+  --gesture-features data/gesture/27022026/gesture_X_test.npy \
+  --gesture-labels data/gesture/27022026/gesture_y_test.npy \
+  --gesture-num-classes 6 \
+  --gesture-norm none \
   --gesture-pack q88 \
   --save-dir report/evidence_dual \
   --tag baseline
@@ -187,8 +203,8 @@ python3 test/dual_cnn_test.py \
 python3 test/dual_cnn_test.py \
   --xsa-path hardware/vivado/dual_cnn.xsa \
   --mode voice \
-  --voice-features data/test-data/voice_X_test.npy \
-  --voice-labels data/test-data/voice_y_test.npy \
+  --voice-features data/audio/25022026/voice_X_test.npy \
+  --voice-labels data/audio/25022026/voice_y_test.npy \
   --voice-pack q88 \
   --save-dir report/evidence_dual \
   --tag baseline
