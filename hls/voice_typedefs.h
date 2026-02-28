@@ -10,13 +10,14 @@
 #define VOICE_NUM_FRAMES 50
 #define VOICE_NUM_CLASSES 3   // go, no, yes
 
-// Block 1: conv 40->12 (k=3) + maxpool2 => 25
-#define VOICE_B1_CH 12
+// Standard VoiceCNN architecture:
+// Block 1: conv 40->16 (k=3) + maxpool2 => 25
+#define VOICE_B1_CH 16
 #define VOICE_B1_T 25
 
-// Block 2: conv 12->16 (k=3), keep temporal length 25
+// Block 2: conv 16->32 (k=3), keep temporal length 25
 // Then AdaptiveAvgPool1d(1) in software is equivalent to global average over T=25.
-#define VOICE_B2_CH 16
+#define VOICE_B2_CH 32
 #define VOICE_B2_T 25
 
 // Fixed-point data type (Q8.8)

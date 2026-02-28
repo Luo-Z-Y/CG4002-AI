@@ -3,7 +3,7 @@
 #include <ap_int.h>
 
 // Helper: ReLU Activation
-data_t relu(data_t x) {
+static inline data_t relu(data_t x) {
     return (x > 0) ? x : (data_t)0;
 }
 
@@ -19,6 +19,8 @@ void gesture_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream
     #pragma HLS INTERFACE axis port=in_stream
     #pragma HLS INTERFACE axis port=out_stream
     #pragma HLS INTERFACE s_axilite port=return
+
+    // Array partitioning to enable parallel access to weights and intermediate buffers
     #pragma HLS ARRAY_PARTITION variable=conv1_w cyclic factor=3 dim=1
     #pragma HLS ARRAY_PARTITION variable=conv2_w cyclic factor=3 dim=1
     #pragma HLS ARRAY_PARTITION variable=fc1_w cyclic factor=16 dim=1
