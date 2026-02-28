@@ -30,8 +30,9 @@ This repository implements a hardware-software co-design for real-time gesture a
 ### Gesture CNN
 - Status: Active and hardware-integrated in `dual_cnn.xsa`
 - Input: IMU window `[60, 6]` (`gyro_x/y/z`, `acc_x/y/z`)
-- AXIS input contract (current deployed `dual_cnn.xsa`): supports both `float32` and signed `Q8.8` packed in AXIS `data[15:0]` via `--gesture-pack`
-- Labels (6, project target semantics): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
+- AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed in AXIS `data[15:0]` (default in `ultra96/dual_cnn_test.py`)
+- Active labels (6, current public dataset): `WALKING`, `WALKING_UPSTAIRS`, `WALKING_DOWNSTAIRS`, `SITTING`, `STANDING`, `LAYING`
+- Project-target labels (future intent): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
 - Training split policy: `train/test` split first, then `train/val`; validation is used for epoch monitoring/model selection, and test is held for final reporting.
 - Current dataset snapshots:
   - Legacy project gesture set (txt-logs + augmentation): `data/gesture/13022026`
@@ -39,8 +40,8 @@ This repository implements a hardware-software co-design for real-time gesture a
   - Public compatibility dataset (UCI HAR converted to repo schema): `data/gesture/27022026`
     - Format compatibility: converted to `[60, 6]` windows with columns `measurement_id, sequence_id, label_id, gyro_x/y/z, acc_x/y/z`
     - Current 6-class labels used in this public set: `WALKING`, `WALKING_UPSTAIRS`, `WALKING_DOWNSTAIRS`, `SITTING`, `STANDING`, `LAYING`
-    - Label semantics note: these differ from project target gesture names above.
-- Evaluation script: `test/dual_cnn_test.py`
+    - Label semantics note: these differ from project-target gesture names above.
+- Evaluation script: `ultra96/dual_cnn_test.py`
 
 ### Voice CNN
 - Status: Architecture updated, retrained, and integrated in `dual_cnn.xsa`
@@ -49,8 +50,8 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Current dataset snapshots:
   - Active training/deployment labels (`yes`, `no`, `go`): `data/audio/18022026`
   - New downloaded candidate set (`marvin`, `sheila`, `visual`): `data/audio/25022026`
-- Evaluation script: `test/dual_cnn_test.py`
-- Voice labels (current 3-class implementation): `go`, `no`, `yes`
+- Evaluation script: `ultra96/dual_cnn_test.py`
+- Voice labels (current 3-class implementation): `yes`, `no`, `go`
 - Future plan: migrate to real Pokémon labels (for first iteration: `pikachu`, `charizard`, `babusaur`) after dataset refresh and retraining.
 
 ### Router
@@ -62,9 +63,9 @@ This repository implements a hardware-software co-design for real-time gesture a
 1. Dual-IP architecture (`gesture_cnn` and `voice_cnn` as separate accelerators)
 - Rationale: independent debug/tuning, cleaner Vivado integration, and isolated resource management.
 
-2. Mixed input contracts in current deployed dual overlay
-- Gesture path currently uses float32 AXIS input.
-- Voice path currently uses Q8.8 AXIS input (`data[15:0]`).
+2. Input contract in current deployed dual overlay
+- Gesture path uses Q8.8 AXIS input (`data[15:0]`).
+- Voice path uses Q8.8 AXIS input (`data[15:0]`).
 - Rationale: this matches the currently deployed and validated `dual_cnn.xsa`.
 
 2a. Current HLS IP input expectation (source-of-truth in `hardware/*.cpp`)
@@ -88,7 +89,8 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Observed outcome: LUT usage reduced to a board-safe range compared with prior near-limit runs; DSP usage remains moderate; latency remains in few-thousand cycles (tens of microseconds at ~100 MHz).
 
 ### Gesture IP
-- Current deployed dual overlay interface reads float32 from AXIS data.
+- PS packs IMU float features to Q8.8 int16 before DMA.
+- PL consumes fixed-point stream directly from AXIS `data[15:0]`.
 - Outcome: gesture path is stable on board with current software packing.
 
 ### Input Normalization (Z-score)
@@ -99,14 +101,14 @@ This repository implements a hardware-software co-design for real-time gesture a
 ### Latest Ultra96 Dual-IP Evidence (2026-02-20)
 Command used:
 ```bash
-python3 test/dual_cnn_test.py \
+python3 ultra96/dual_cnn_test.py \
   --xsa-path dual_cnn.xsa \
   --gesture-core gesture_cnn_0 \
   --voice-core voice_cnn_0 \
   --gesture-dma axi_dma_1 \
   --voice-dma axi_dma_0 \
   --mode both \
-  --gesture-pack float32 \
+  --gesture-pack q88 \
   --voice-pack q88
 ```
 
@@ -185,13 +187,12 @@ CG4002-AI/
 ### 2. Gesture Evaluation (Ultra96)
 
 ```bash
-python3 test/dual_cnn_test.py \
+python3 ultra96/dual_cnn_test.py \
   --xsa-path hardware/vivado/dual_cnn.xsa \
   --mode gesture \
   --gesture-features data/gesture/27022026/gesture_X_test.npy \
   --gesture-labels data/gesture/27022026/gesture_y_test.npy \
   --gesture-num-classes 6 \
-  --gesture-norm none \
   --gesture-pack q88 \
   --save-dir report/evidence_dual \
   --tag baseline
@@ -200,7 +201,7 @@ python3 test/dual_cnn_test.py \
 ### 3. Voice Evaluation (Ultra96)
 
 ```bash
-python3 test/dual_cnn_test.py \
+python3 ultra96/dual_cnn_test.py \
   --xsa-path hardware/vivado/dual_cnn.xsa \
   --mode voice \
   --voice-features data/audio/25022026/voice_X_test.npy \
@@ -217,8 +218,8 @@ python3 test/router.py \
   --xsa-path <dual_overlay.xsa> \
   --gesture-core gesture_cnn_0 \
   --voice-core voice_cnn_0 \
-  --gesture-dma axi_dma_gesture \
-  --voice-dma axi_dma_voice \
+  --gesture-dma axi_dma_1 \
+  --voice-dma axi_dma_0 \
   --demo-mode
 ```
 

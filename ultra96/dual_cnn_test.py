@@ -20,8 +20,16 @@ DEFAULT_VOICE_Y = "voice_y_test.npy"
 DEFAULT_OUTDIR = "report/evidence_dual"
 
 
-DEFAULT_GESTURE_LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
-VOICE_LABELS = ["yes", "no", "go"]
+# Active public-dataset label semantics used by current gesture npy set.
+DEFAULT_GESTURE_LABELS = [
+    "WALKING",
+    "WALKING_UPSTAIRS",
+    "WALKING_DOWNSTAIRS",
+    "SITTING",
+    "STANDING",
+    "LAYING",
+]
+VOICE_LABELS = ["marvin", "sheila", "visual"]
 
 
 @dataclass
@@ -311,8 +319,8 @@ def parse_args():
 
     p.add_argument("--gesture-core", default="gesture_cnn_0")
     p.add_argument("--voice-core", default="voice_cnn_0")
-    p.add_argument("--gesture-dma", default="axi_dma_gesture")
-    p.add_argument("--voice-dma", default="axi_dma_voice")
+    p.add_argument("--gesture-dma", default="axi_dma_1")
+    p.add_argument("--voice-dma", default="axi_dma_0")
 
     # Active default path uses npy test sets for both subsystems.
     p.add_argument("--gesture-features", default=DEFAULT_GESTURE_X)
