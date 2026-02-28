@@ -17,6 +17,8 @@ static const int CONV2_II = 4;
 // Use wider accumulators so 120-term and 48-term sums don't saturate/truncate early.
 typedef ap_fixed<24, 16, AP_TRN, AP_SAT> conv_acc_t;   // F=8, safer conv sum
 typedef ap_fixed<32, 24, AP_TRN, AP_SAT> pool_acc_t;   // for sum over 25 timesteps
+// Keep full multiply precision (Q16.16-like) before accumulation.
+typedef ap_fixed<32, 16, AP_TRN, AP_SAT> mul_acc_t;
 
 // ReLU
 static inline data_t relu(data_t x) {
@@ -33,10 +35,10 @@ static inline data_t q88_from_axis(ap_uint<32> w) {
     return v;
 }
 
-// Force multiply into DSP (keeps LUT down). Returns data_t to avoid widening the DSP multiply.
-static inline data_t mul_dsp(data_t a, data_t b) {
+// Force multiply into DSP and keep wider product precision before accumulation.
+static inline mul_acc_t mul_dsp(data_t a, data_t b) {
 #pragma HLS INLINE
-    data_t p = a * b;
+    mul_acc_t p = (mul_acc_t)a * (mul_acc_t)b;
 #pragma HLS bind_op variable=p op=mul impl=dsp
     return p;
 }

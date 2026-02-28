@@ -7,6 +7,7 @@
 
 typedef ap_fixed<24, 16, AP_TRN, AP_SAT> conv_acc_t;
 typedef ap_fixed<32, 24, AP_TRN, AP_SAT> pool_acc_t;
+typedef ap_fixed<32, 16, AP_TRN, AP_SAT> mul_acc_t;
 
 static unsigned int q88_to_u32(float f) {
     int q = static_cast<int>(f * 256.0f + (f >= 0.0f ? 0.5f : -0.5f));
@@ -50,7 +51,7 @@ static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
                 for (int i = 0; i < VOICE_NUM_MFCC; i++) {
                     for (int k = 0; k < 3; k++) {
                         int w_idx = o * (VOICE_NUM_MFCC * 3) + i * 3 + k;
-                        data_t prod = (data_t)(input_pad[i][pad_t + (k - 1)] * conv1_w[w_idx]);
+                        mul_acc_t prod = (mul_acc_t)input_pad[i][pad_t + (k - 1)] * (mul_acc_t)conv1_w[w_idx];
                         acc += (conv_acc_t)prod;
                     }
                 }
@@ -70,7 +71,7 @@ static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
             for (int i = 0; i < VOICE_B1_CH; i++) {
                 for (int k = 0; k < 3; k++) {
                     int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
-                    data_t prod = (data_t)(b1_pad[i][pad_t + (k - 1)] * conv2_w[w_idx]);
+                    mul_acc_t prod = (mul_acc_t)b1_pad[i][pad_t + (k - 1)] * (mul_acc_t)conv2_w[w_idx];
                     acc += (conv_acc_t)prod;
                 }
             }
@@ -83,7 +84,7 @@ static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
     for (int c = 0; c < VOICE_NUM_CLASSES; c++) {
         conv_acc_t acc = (conv_acc_t)fc_b[c];
         for (int i = 0; i < VOICE_B2_CH; i++) {
-            data_t prod = (data_t)(pooled[i] * fc_w[c * VOICE_B2_CH + i]);
+            mul_acc_t prod = (mul_acc_t)pooled[i] * (mul_acc_t)fc_w[c * VOICE_B2_CH + i];
             acc += (conv_acc_t)prod;
         }
         logits[c] = (data_t)acc;
