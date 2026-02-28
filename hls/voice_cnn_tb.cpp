@@ -5,10 +5,6 @@
 #include "voice_cnn_weights.h"
 #include "voice_tb_cases.h"
 
-typedef ap_fixed<40, 20, AP_TRN, AP_SAT> conv_acc_t;
-typedef ap_fixed<48, 24, AP_TRN, AP_SAT> pool_acc_t;
-typedef ap_fixed<32, 16, AP_TRN, AP_SAT> mul_acc_t;
-
 static unsigned int q88_to_u32(float f) {
     int q = static_cast<int>(f * 256.0f + (f >= 0.0f ? 0.5f : -0.5f));
     if (q > 32767) q = 32767;
@@ -22,7 +18,9 @@ static inline data_t relu_ref(data_t x) {
 
 static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
     data_t input_pad[VOICE_NUM_MFCC][VOICE_NUM_FRAMES + 2];
+    data_t b1_out[VOICE_B1_CH][VOICE_B1_T];
     data_t b1_pad[VOICE_B1_CH][VOICE_B1_T + 2];
+    data_t b2_out[VOICE_B2_CH][VOICE_B2_T];
     data_t pooled[VOICE_B2_CH];
     data_t logits[VOICE_NUM_CLASSES];
 
@@ -47,47 +45,59 @@ static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
             for (int p = 0; p < 2; p++) {
                 int curr_t = t * 2 + p;
                 int pad_t = curr_t + 1;
-                conv_acc_t acc = (conv_acc_t)conv1_b[o];
+                data_t s = conv1_b[o];
                 for (int i = 0; i < VOICE_NUM_MFCC; i++) {
                     for (int k = 0; k < 3; k++) {
                         int w_idx = o * (VOICE_NUM_MFCC * 3) + i * 3 + k;
-                        mul_acc_t prod = (mul_acc_t)input_pad[i][pad_t + (k - 1)] * (mul_acc_t)conv1_w[w_idx];
-                        acc += (conv_acc_t)prod;
+                        s += (data_t)(input_pad[i][pad_t + (k - 1)] * conv1_w[w_idx]);
                     }
                 }
-                data_t v = relu_ref((data_t)acc);
+                data_t v = relu_ref(s);
                 if (v > max_val) max_val = v;
             }
-            b1_pad[o][t + 1] = max_val;
+            b1_out[o][t] = max_val;
+        }
+    }
+
+    for (int c = 0; c < VOICE_B1_CH; c++) {
+        b1_pad[c][0] = (data_t)0;
+        b1_pad[c][VOICE_B1_T + 1] = (data_t)0;
+    }
+    for (int c = 0; c < VOICE_B1_CH; c++) {
+        for (int t = 0; t < VOICE_B1_T; t++) {
+            b1_pad[c][t + 1] = b1_out[c][t];
+        }
+    }
+
+    for (int o = 0; o < VOICE_B2_CH; o++) {
+        for (int t = 0; t < VOICE_B2_T; t++) {
+            int pad_t = t + 1;
+            data_t s = conv2_b[o];
+            for (int i = 0; i < VOICE_B1_CH; i++) {
+                for (int k = 0; k < 3; k++) {
+                    int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
+                    s += (data_t)(b1_pad[i][pad_t + (k - 1)] * conv2_w[w_idx]);
+                }
+            }
+            b2_out[o][t] = relu_ref(s);
         }
     }
 
     const data_t invT = (data_t)(1.0f / VOICE_B2_T);
-    for (int o = 0; o < VOICE_B2_CH; o++) {
-        pool_acc_t sum_t = (pool_acc_t)0;
+    for (int c = 0; c < VOICE_B2_CH; c++) {
+        data_t s = (data_t)0;
         for (int t = 0; t < VOICE_B2_T; t++) {
-            int pad_t = t + 1;
-            conv_acc_t acc = (conv_acc_t)conv2_b[o];
-            for (int i = 0; i < VOICE_B1_CH; i++) {
-                for (int k = 0; k < 3; k++) {
-                    int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
-                    mul_acc_t prod = (mul_acc_t)b1_pad[i][pad_t + (k - 1)] * (mul_acc_t)conv2_w[w_idx];
-                    acc += (conv_acc_t)prod;
-                }
-            }
-            data_t y = relu_ref((data_t)acc);
-            sum_t += (pool_acc_t)y;
+            s += b2_out[c][t];
         }
-        pooled[o] = (data_t)(sum_t * (pool_acc_t)invT);
+        pooled[c] = s * invT;
     }
 
     for (int c = 0; c < VOICE_NUM_CLASSES; c++) {
-        conv_acc_t acc = (conv_acc_t)fc_b[c];
+        data_t s = fc_b[c];
         for (int i = 0; i < VOICE_B2_CH; i++) {
-            mul_acc_t prod = (mul_acc_t)pooled[i] * (mul_acc_t)fc_w[c * VOICE_B2_CH + i];
-            acc += (conv_acc_t)prod;
+            s += (data_t)(pooled[i] * fc_w[c * VOICE_B2_CH + i]);
         }
-        logits[c] = (data_t)acc;
+        logits[c] = s;
     }
 
     int best_class = 0;
