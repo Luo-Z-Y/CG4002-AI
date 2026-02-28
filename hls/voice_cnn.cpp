@@ -14,11 +14,10 @@ static const int CONV2_II = 4;
 // Accumulator types (do NOT increase DSP; only widens adders a bit)
 // ============================================================
 // data_t is Q8.8 (ap_fixed<16,8,...>)
-// Use wider accumulators so 120-term and 48-term sums don't saturate/truncate early.
-typedef ap_fixed<24, 16, AP_TRN, AP_SAT> conv_acc_t;   // F=8, safer conv sum
-typedef ap_fixed<32, 24, AP_TRN, AP_SAT> pool_acc_t;   // for sum over 25 timesteps
-// Keep full multiply precision (Q16.16-like) before accumulation.
-typedef ap_fixed<32, 16, AP_TRN, AP_SAT> mul_acc_t;
+// Use accumulators with >=16 fractional bits so MAC does not collapse to Q*.8 mid-sum.
+typedef ap_fixed<40, 20, AP_TRN, AP_SAT> conv_acc_t;
+typedef ap_fixed<48, 24, AP_TRN, AP_SAT> pool_acc_t;
+typedef ap_fixed<32, 16, AP_TRN, AP_SAT> mul_acc_t; // exact Q16.16 product carrier
 
 // ReLU
 static inline data_t relu(data_t x) {

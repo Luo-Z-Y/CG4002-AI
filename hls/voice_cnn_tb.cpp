@@ -5,8 +5,8 @@
 #include "voice_cnn_weights.h"
 #include "voice_tb_cases.h"
 
-typedef ap_fixed<24, 16, AP_TRN, AP_SAT> conv_acc_t;
-typedef ap_fixed<32, 24, AP_TRN, AP_SAT> pool_acc_t;
+typedef ap_fixed<40, 20, AP_TRN, AP_SAT> conv_acc_t;
+typedef ap_fixed<48, 24, AP_TRN, AP_SAT> pool_acc_t;
 typedef ap_fixed<32, 16, AP_TRN, AP_SAT> mul_acc_t;
 
 static unsigned int q88_to_u32(float f) {
