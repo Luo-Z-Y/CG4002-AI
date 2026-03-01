@@ -174,8 +174,8 @@ CG4002-AI/
 - Gesture preprocessing: `test/gesture_preprocess.py`
 - Voice preprocessing: `test/voice_preprocess.py`
 - Evaluation and artifact export:
-  - Gesture: `test/gesture_test.py`
-  - Voice: `test/voice_test.py`
+  - Gesture: `ultra96/dual_cnn_test.py --mode gesture`
+  - Voice: `ultra96/dual_cnn_test.py --mode voice`
 - Routing scaffold: `test/router.py`
 
 ## Quick Start
@@ -230,7 +230,50 @@ python3 test/router.py \
 - Ultra96 setup and low-level access: implemented in test scripts (`Overlay`, DMA, MMIO)
 - Software implementation and evaluation: complete gesture flow; voice flow implemented with fixed-point streaming path
 - Hardware evidence in repo: `report/gesture_cnn_csynth.rpt`, `report/vivado-project-summary.png`
-- Power-management hooks available in `test/gesture_test.py` (`--cpu-governor`, `--pl-clock-mhz`, `--power-w`)
+- Power-management hooks available in `ultra96/dual_cnn_test.py` (`--cpu-governor`, `--cpu-freq-khz`, `--pl-clock-mhz`, `--power-w`, `--power-sysfs-path`)
+
+## Ultra96 Power/Timing Flags (`ultra96/dual_cnn_test.py`)
+
+Each flag below is independent and can be used together in one command.
+
+- `--cpu-governor <name>`
+  - Purpose: request Linux CPU governor (for example `performance`, `userspace`, `ondemand`).
+  - Example: `python3 ultra96/dual_cnn_test.py --mode both --cpu-governor performance`
+  - Note: typically needs root privileges.
+
+- `--cpu-freq-khz <khz>`
+  - Purpose: request CPU clock frequency in kHz (for A53 cpufreq policy).
+  - Example: `python3 ultra96/dual_cnn_test.py --mode both --cpu-governor userspace --cpu-freq-khz 1200000`
+  - Note: usually requires `userspace` governor and root privileges.
+
+- `--pl-clock-mhz <mhz>`
+  - Purpose: request PL FCLK0 clock via PYNQ `Clocks` API.
+  - Example: `python3 ultra96/dual_cnn_test.py --mode both --pl-clock-mhz 100`
+  - Note: applied best-effort; depends on board/overlay support.
+
+- `--power-w <watts>`
+  - Purpose: provide manual board power to compute per-inference energy estimates in report.
+  - Example: `python3 ultra96/dual_cnn_test.py --mode both --power-w 4.2`
+
+- `--power-sysfs-path <path>`
+  - Purpose: read board power value from sysfs-like file and store in runtime report.
+  - Example: `python3 ultra96/dual_cnn_test.py --mode both --power-sysfs-path /sys/class/hwmon/hwmon0/power1_input`
+
+- `--power-sysfs-scale <scale>`
+  - Purpose: scale raw value from `--power-sysfs-path` into Watts.
+  - Example: `python3 ultra96/dual_cnn_test.py --mode both --power-sysfs-path /sys/class/hwmon/hwmon0/power1_input --power-sysfs-scale 1e-6`
+  - Note: use `1e-6` when the sysfs value is in microwatts.
+
+Recorded timing/overhead fields in `summary.json` (for both gesture and voice summaries):
+
+- `latency_total_*_ms`: end-to-end per sample (`prep + control + DMA path`).
+- `latency_inference_*_ms`: inference path on PS side (`control + DMA path`).
+- `latency_comm_*_ms`: DMA communication overhead (`submit + wait`).
+- `latency_prep_*_ms`: preprocessing/packing overhead on PS.
+- `latency_dma_submit_*_ms`: DMA transfer submission overhead.
+- `latency_dma_wait_*_ms`: DMA wait/complete overhead.
+- `energy_total_mean_mj`, `energy_inference_mean_mj`, `energy_comm_mean_mj`: present when `power_w` is available.
+- `runtime_controls`: captures requested values, before/after observed values, and warnings when settings cannot be applied.
 
 ## Evaluation Metrics for Final Report
 
@@ -244,7 +287,7 @@ python3 test/router.py \
   - WNS < 0: timing violation
 
 3. End-to-end runtime on PYNQ
-- Measure PS preprocessing, DMA send, IP compute, DMA receive, and total inference latency.
+- Measure and report PS preprocessing overhead, control overhead, DMA communication overhead, inference-path latency, and total end-to-end latency.
 
 4. Accuracy stability across deployment stages
 - Compare:

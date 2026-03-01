@@ -2,9 +2,12 @@
 #include "voice_cnn_weights.h"
 #include <ap_int.h>
 
-// Keep Q8.8 for storage/IO, but use much wider internal accumulation.
-// 12 integer bits can still saturate (e.g., pooling 25 * ~127 > 2048).
-typedef ap_fixed<48, 20, AP_TRN, AP_SAT> acc_t;
+// Keep Q8.8 for storage/IO.
+// Use a moderate accumulator width to avoid saturation while keeping adder logic smaller.
+// 14 integer bits safely covers pooling/convolution sums (~3k range).
+typedef ap_fixed<24, 14, AP_TRN, AP_WRAP> acc_t;
+// Keep multipliers at 16x16 -> 32-bit fixed-point to avoid very wide DSP mapping.
+typedef ap_fixed<32, 16, AP_TRN, AP_WRAP> mul_t;
 
 // ReLU
 static inline data_t relu(data_t x) {
@@ -21,8 +24,8 @@ static inline data_t q88_from_axis(ap_uint<32> w) {
 }
 
 // Force multiply into DSP (trades DSP for LUT reduction)
-static inline acc_t mul_dsp(data_t a, data_t b) {
-    acc_t p = (acc_t)a * (acc_t)b;
+static inline mul_t mul_dsp(data_t a, data_t b) {
+    mul_t p = (mul_t)a * (mul_t)b;
 #pragma HLS bind_op variable=p op=mul impl=dsp
     return p;
 }
@@ -32,8 +35,11 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
 #pragma HLS INTERFACE axis port=out_stream
 #pragma HLS INTERFACE s_axilite port=return
 
-    // Keep DSP under control if needed (you can raise/lower later)
-#pragma HLS ALLOCATION operation instances=mul limit=240
+    // Allow more multipliers to reduce heavy sharing mux/control LUT overhead.
+#pragma HLS ALLOCATION operation instances=mul limit=128
+    // Push arithmetic into DSP blocks where possible to shift pressure away from LUT.
+#pragma HLS bind_op op=add impl=dsp
+#pragma HLS bind_op op=sub impl=dsp
 
     // --------------------------------------------------------------------
     // Force large constant weights into BRAM-backed ROM (reduces LUT ROM).
@@ -59,9 +65,7 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     // padded b1 to remove boundary checks in conv2 (saves control/mux LUT)
     data_t b1_pad[VOICE_B1_CH][VOICE_B1_T + 2];
 #pragma HLS BIND_STORAGE variable=b1_pad type=ram_2p impl=bram
-
-    data_t b2_out[VOICE_B2_CH][VOICE_B2_T];
-#pragma HLS BIND_STORAGE variable=b2_out type=ram_2p impl=bram
+    data_t pooled[VOICE_B2_CH];
 
     // ============================================================
     // 1) Initialise padding and read input samples (Q8.8 int16 packed in AXIS)
@@ -88,7 +92,7 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     // ============================================================
     for (int o = 0; o < VOICE_B1_CH; o++) {
         for (int t = 0; t < VOICE_B1_T; t++) {
-#pragma HLS PIPELINE II=4
+#pragma HLS PIPELINE II=16
 
             data_t max_val = (data_t)-128;
 
@@ -135,9 +139,11 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     // VOICE_B2_T should be 25 for your PyTorch AdaptiveAvgPool1d(1) design.
     // Now no boundary checks because we use b1_pad.
     // ============================================================
+    const data_t invT = (data_t)(1.0f / VOICE_B2_T);
     for (int o = 0; o < VOICE_B2_CH; o++) {
+        acc_t sum_t = (acc_t)0;
         for (int t = 0; t < VOICE_B2_T; t++) {
-#pragma HLS PIPELINE II=4
+#pragma HLS PIPELINE II=16
 
             int pad_t = t + 1; // centre index in padded buffer
             acc_t s = (acc_t)conv2_b[o];
@@ -149,23 +155,11 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
                 }
             }
 
-            b2_out[o][t] = relu((data_t)s);
+            // Pool on-the-fly to avoid materializing full b2_out buffer.
+            data_t y = relu((data_t)s);
+            sum_t += (acc_t)y;
         }
-    }
-
-    // ============================================================
-    // 5) Global average pool over T=VOICE_B2_T (25)
-    // ============================================================
-    data_t pooled[VOICE_B2_CH];
-    const data_t invT = (data_t)(1.0f / VOICE_B2_T);
-
-    for (int c = 0; c < VOICE_B2_CH; c++) {
-        acc_t s = (acc_t)0;
-        for (int t = 0; t < VOICE_B2_T; t++) {
-#pragma HLS PIPELINE II=1
-            s += (acc_t)b2_out[c][t];
-        }
-        pooled[c] = (data_t)(s * (acc_t)invT);
+        pooled[o] = (data_t)(sum_t * (acc_t)invT);
     }
 
     // ============================================================
@@ -176,7 +170,7 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     for (int c = 0; c < VOICE_NUM_CLASSES; c++) {
         acc_t s = (acc_t)fc_b[c];
         for (int i = 0; i < VOICE_B2_CH; i++) {
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=2
             s += (acc_t)mul_dsp(pooled[i], fc_w[c * VOICE_B2_CH + i]);
         }
         logits[c] = (data_t)s;
