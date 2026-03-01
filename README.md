@@ -48,10 +48,10 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Input feature shape: MFCC `[40, 50]`
 - AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed into AXIS `data[15:0]`
 - Current dataset snapshots:
-  - Active training/deployment labels (`yes`, `no`, `go`): `data/audio/18022026`
-  - New downloaded candidate set (`marvin`, `sheila`, `visual`): `data/audio/25022026`
+  - Active training/deployment labels (`marvin`, `sheila`, `visual`): `data/audio/25022026`
+  - Legacy label set (`yes`, `no`, `go`): `data/audio/18022026`
 - Evaluation script: `ultra96/dual_cnn_test.py`
-- Voice labels (current 3-class implementation): `yes`, `no`, `go`
+- Voice labels (current 3-class implementation): `marvin`, `sheila`, `visual`
 - Future plan: migrate to real Pokémon labels (for first iteration: `pikachu`, `charizard`, `babusaur`) after dataset refresh and retraining.
 
 ### Router
@@ -118,7 +118,7 @@ Observed results:
 - Evidence artifact: `report/evidence_dual/20260220_184325/summary.json`
 
 ### Latest Voice Software Test (2026-02-25)
-- Dataset: `yes/no/go`, split before augmentation to avoid leakage
+- Dataset: `marvin/sheila/visual`, split before augmentation to avoid leakage
 - Test accuracy (float): `77.28%`
 - Test accuracy (Q8.8-sim): `77.28%`
 - Test set size: `1800` samples (`600` per class)

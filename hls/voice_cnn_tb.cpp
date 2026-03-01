@@ -1,9 +1,12 @@
 #include <iostream>
 #include <string>
 #include <cstdint>
+#include <ap_int.h>
 #include "voice_cnn.h"
 #include "voice_cnn_weights.h"
 #include "voice_tb_cases.h"
+
+typedef ap_fixed<48, 20, AP_TRN, AP_SAT> acc_t;
 
 static unsigned int q88_to_u32(float f) {
     int q = static_cast<int>(f * 256.0f + (f >= 0.0f ? 0.5f : -0.5f));
@@ -14,6 +17,13 @@ static unsigned int q88_to_u32(float f) {
 
 static inline data_t relu_ref(data_t x) {
     return (x > (data_t)0) ? x : (data_t)0;
+}
+
+static inline data_t q88_word_to_data(uint32_t w) {
+    ap_int<16> raw = (ap_int<16>)(w & 0xFFFF);
+    data_t v;
+    v.range(15, 0) = raw;
+    return v;
 }
 
 static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
@@ -45,14 +55,14 @@ static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
             for (int p = 0; p < 2; p++) {
                 int curr_t = t * 2 + p;
                 int pad_t = curr_t + 1;
-                data_t s = conv1_b[o];
+                acc_t s = (acc_t)conv1_b[o];
                 for (int i = 0; i < VOICE_NUM_MFCC; i++) {
                     for (int k = 0; k < 3; k++) {
                         int w_idx = o * (VOICE_NUM_MFCC * 3) + i * 3 + k;
-                        s += (data_t)(input_pad[i][pad_t + (k - 1)] * conv1_w[w_idx]);
+                        s += (acc_t)input_pad[i][pad_t + (k - 1)] * (acc_t)conv1_w[w_idx];
                     }
                 }
-                data_t v = relu_ref(s);
+                data_t v = relu_ref((data_t)s);
                 if (v > max_val) max_val = v;
             }
             b1_out[o][t] = max_val;
@@ -72,32 +82,32 @@ static int voice_ref(const data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC]) {
     for (int o = 0; o < VOICE_B2_CH; o++) {
         for (int t = 0; t < VOICE_B2_T; t++) {
             int pad_t = t + 1;
-            data_t s = conv2_b[o];
+            acc_t s = (acc_t)conv2_b[o];
             for (int i = 0; i < VOICE_B1_CH; i++) {
                 for (int k = 0; k < 3; k++) {
                     int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
-                    s += (data_t)(b1_pad[i][pad_t + (k - 1)] * conv2_w[w_idx]);
+                    s += (acc_t)b1_pad[i][pad_t + (k - 1)] * (acc_t)conv2_w[w_idx];
                 }
             }
-            b2_out[o][t] = relu_ref(s);
+            b2_out[o][t] = relu_ref((data_t)s);
         }
     }
 
     const data_t invT = (data_t)(1.0f / VOICE_B2_T);
     for (int c = 0; c < VOICE_B2_CH; c++) {
-        data_t s = (data_t)0;
+        acc_t s = (acc_t)0;
         for (int t = 0; t < VOICE_B2_T; t++) {
-            s += b2_out[c][t];
+            s += (acc_t)b2_out[c][t];
         }
-        pooled[c] = s * invT;
+        pooled[c] = (data_t)(s * (acc_t)invT);
     }
 
     for (int c = 0; c < VOICE_NUM_CLASSES; c++) {
-        data_t s = fc_b[c];
+        acc_t s = (acc_t)fc_b[c];
         for (int i = 0; i < VOICE_B2_CH; i++) {
-            s += (data_t)(pooled[i] * fc_w[c * VOICE_B2_CH + i]);
+            s += (acc_t)pooled[i] * (acc_t)fc_w[c * VOICE_B2_CH + i];
         }
-        logits[c] = s;
+        logits[c] = (data_t)s;
     }
 
     int best_class = 0;
@@ -160,10 +170,16 @@ static int run_dataset_cases(double pass_threshold) {
     int total = VOICE_TB_NUM_CASES;
     int correct = 0;
     int protocol_failures = 0;
+    int mismatches = 0;
+    int ref_label_mismatch = 0;
+    int ref_pred_mismatch = 0;
+    const int verbose_failures = 20;
+    int cm[VOICE_NUM_CLASSES][VOICE_NUM_CLASSES] = {};
 
     for (int n = 0; n < VOICE_TB_NUM_CASES; n++) {
         hls::stream<axis_t> in_stream("voice_in_ds");
         hls::stream<axis_t> out_stream("voice_out_ds");
+        data_t in_tc[VOICE_NUM_FRAMES][VOICE_NUM_MFCC];
 
         for (int i = 0; i < words_per_case; i++) {
             axis_t pkt;
@@ -172,6 +188,22 @@ static int run_dataset_cases(double pass_threshold) {
             pkt.strb = 0xF;
             pkt.last = (i == words_per_case - 1) ? 1 : 0;
             in_stream.write(pkt);
+
+            int t = i / VOICE_NUM_MFCC;
+            int c = i % VOICE_NUM_MFCC;
+            in_tc[t][c] = q88_word_to_data(voice_tb_input_q88[n][i]);
+        }
+
+        const int expected_ref = voice_ref(in_tc);
+        const int expected_ds = voice_tb_expected[n];
+        if (expected_ref != expected_ds) {
+            ref_label_mismatch++;
+            if (ref_label_mismatch <= verbose_failures) {
+                std::cout << "[WARN] case " << n
+                          << " dataset_label=" << expected_ds
+                          << " voice_ref=" << expected_ref
+                          << "\n";
+            }
         }
 
         voice_cnn(in_stream, out_stream);
@@ -192,8 +224,25 @@ static int run_dataset_cases(double pass_threshold) {
             continue;
         }
 
-        if (pred == voice_tb_expected[n]) {
+        if (expected_ds >= 0 && expected_ds < VOICE_NUM_CLASSES) {
+            cm[expected_ds][pred] += 1;
+        }
+
+        if (pred == expected_ds) {
             correct++;
+        } else {
+            mismatches++;
+            if (mismatches <= verbose_failures) {
+                std::cout << "[MIS] case " << n
+                          << " pred=" << pred
+                          << " dataset_label=" << expected_ds
+                          << " voice_ref=" << expected_ref
+                          << "\n";
+            }
+        }
+
+        if (pred != expected_ref) {
+            ref_pred_mismatch++;
         }
     }
 
@@ -205,7 +254,20 @@ static int run_dataset_cases(double pass_threshold) {
               << " acc=" << acc << "% threshold=" << pass_threshold << "%"
               << " correct=" << correct << "/" << total
               << " protocol_failures=" << protocol_failures
+              << " mismatches=" << mismatches
+              << " ref_label_mismatch=" << ref_label_mismatch
+              << " ref_pred_mismatch=" << ref_pred_mismatch
               << "\n";
+
+    std::cout << "Confusion matrix [true][pred]:\n";
+    for (int t = 0; t < VOICE_NUM_CLASSES; t++) {
+        std::cout << "  true " << t << " : ";
+        for (int p = 0; p < VOICE_NUM_CLASSES; p++) {
+            std::cout << cm[t][p];
+            if (p + 1 < VOICE_NUM_CLASSES) std::cout << " ";
+        }
+        std::cout << "\n";
+    }
 
     return pass ? 0 : 1;
 }
@@ -214,6 +276,17 @@ int main() {
     std::cout << "========================================\n";
     std::cout << "   Voice CNN HLS Testbench (Robust)\n";
     std::cout << "========================================\n";
+    std::cout << "Weight fingerprint:\n";
+    std::cout << "  conv1_w[0..2]=[" << (float)conv1_w[0] << ", " << (float)conv1_w[1] << ", " << (float)conv1_w[2] << "]\n";
+    std::cout << "  conv2_w[0..2]=[" << (float)conv2_w[0] << ", " << (float)conv2_w[1] << ", " << (float)conv2_w[2] << "]\n";
+    std::cout << "  fc_w[0..2]=[" << (float)fc_w[0] << ", " << (float)fc_w[1] << ", " << (float)fc_w[2] << "]\n";
+    std::cout << "  fc_b[0..2]=[" << (float)fc_b[0] << ", " << (float)fc_b[1] << ", " << (float)fc_b[2] << "]\n";
+    std::cout << "  first_labels=[" 
+              << voice_tb_expected[0] << ", "
+              << voice_tb_expected[1] << ", "
+              << voice_tb_expected[2] << ", "
+              << voice_tb_expected[3] << ", "
+              << voice_tb_expected[4] << "]\n";
 
     int failures = 0;
 

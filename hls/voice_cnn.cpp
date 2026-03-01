@@ -2,6 +2,10 @@
 #include "voice_cnn_weights.h"
 #include <ap_int.h>
 
+// Keep Q8.8 for storage/IO, but use much wider internal accumulation.
+// 12 integer bits can still saturate (e.g., pooling 25 * ~127 > 2048).
+typedef ap_fixed<48, 20, AP_TRN, AP_SAT> acc_t;
+
 // ReLU
 static inline data_t relu(data_t x) {
     return (x > (data_t)0) ? x : (data_t)0;
@@ -17,8 +21,8 @@ static inline data_t q88_from_axis(ap_uint<32> w) {
 }
 
 // Force multiply into DSP (trades DSP for LUT reduction)
-static inline data_t mul_dsp(data_t a, data_t b) {
-    data_t p = a * b;
+static inline acc_t mul_dsp(data_t a, data_t b) {
+    acc_t p = (acc_t)a * (acc_t)b;
 #pragma HLS bind_op variable=p op=mul impl=dsp
     return p;
 }
@@ -92,17 +96,17 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
                 int curr_t = t * 2 + p;   // 0..49
                 int pad_t  = curr_t + 1;  // 1..50
 
-                data_t s = conv1_b[o];
+                acc_t s = (acc_t)conv1_b[o];
 
                 for (int i = 0; i < VOICE_NUM_MFCC; i++) {
                     // k=0..2 corresponds to offsets -1,0,+1
                     for (int k = 0; k < 3; k++) {
                         int w_idx = o * (VOICE_NUM_MFCC * 3) + i * 3 + k;
-                        s += mul_dsp(input_pad[i][pad_t + (k - 1)], conv1_w[w_idx]);
+                        s += (acc_t)mul_dsp(input_pad[i][pad_t + (k - 1)], conv1_w[w_idx]);
                     }
                 }
 
-                data_t v = relu(s);
+                data_t v = relu((data_t)s);
                 if (v > max_val) max_val = v;
             }
 
@@ -136,16 +140,16 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
 #pragma HLS PIPELINE II=4
 
             int pad_t = t + 1; // centre index in padded buffer
-            data_t s = conv2_b[o];
+            acc_t s = (acc_t)conv2_b[o];
 
             for (int i = 0; i < VOICE_B1_CH; i++) {
                 for (int k = 0; k < 3; k++) {
                     int w_idx = o * (VOICE_B1_CH * 3) + i * 3 + k;
-                    s += mul_dsp(b1_pad[i][pad_t + (k - 1)], conv2_w[w_idx]);
+                    s += (acc_t)mul_dsp(b1_pad[i][pad_t + (k - 1)], conv2_w[w_idx]);
                 }
             }
 
-            b2_out[o][t] = relu(s);
+            b2_out[o][t] = relu((data_t)s);
         }
     }
 
@@ -156,12 +160,12 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     const data_t invT = (data_t)(1.0f / VOICE_B2_T);
 
     for (int c = 0; c < VOICE_B2_CH; c++) {
-        data_t s = (data_t)0;
+        acc_t s = (acc_t)0;
         for (int t = 0; t < VOICE_B2_T; t++) {
 #pragma HLS PIPELINE II=1
-            s += b2_out[c][t];
+            s += (acc_t)b2_out[c][t];
         }
-        pooled[c] = s * invT;
+        pooled[c] = (data_t)(s * (acc_t)invT);
     }
 
     // ============================================================
@@ -170,12 +174,12 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
     data_t logits[VOICE_NUM_CLASSES];
 
     for (int c = 0; c < VOICE_NUM_CLASSES; c++) {
-        data_t s = fc_b[c];
+        acc_t s = (acc_t)fc_b[c];
         for (int i = 0; i < VOICE_B2_CH; i++) {
 #pragma HLS PIPELINE II=1
-            s += mul_dsp(pooled[i], fc_w[c * VOICE_B2_CH + i]);
+            s += (acc_t)mul_dsp(pooled[i], fc_w[c * VOICE_B2_CH + i]);
         }
-        logits[c] = s;
+        logits[c] = (data_t)s;
     }
 
     // ============================================================

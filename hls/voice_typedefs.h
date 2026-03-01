@@ -8,7 +8,7 @@
 // Voice model configuration
 #define VOICE_NUM_MFCC 40
 #define VOICE_NUM_FRAMES 50
-#define VOICE_NUM_CLASSES 3   // go, no, yes
+#define VOICE_NUM_CLASSES 3   // marvin, sheila, visual
 
 // Standard VoiceCNN architecture:
 // Block 1: conv 40->16 (k=3) + maxpool2 => 25
