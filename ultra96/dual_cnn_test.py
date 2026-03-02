@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import time
 from dataclasses import dataclass
@@ -12,7 +11,9 @@ import numpy as np
 from pynq import Overlay, allocate
 
 
-# Defaults for your current repo layout.
+# -------------------------
+# Project defaults/constants
+# -------------------------
 DEFAULT_XSA = "dual_cnn.xsa"
 DEFAULT_GESTURE_X = "gesture_X_test.npy"
 DEFAULT_GESTURE_Y = "gesture_y_test.npy"
@@ -20,9 +21,12 @@ DEFAULT_VOICE_X = "voice_X_test.npy"
 DEFAULT_VOICE_Y = "voice_y_test.npy"
 DEFAULT_OUTDIR = "report/evidence_dual"
 
+GESTURE_CORE_NAME = "gesture_cnn_0"
+VOICE_CORE_NAME = "voice_cnn_0"
+GESTURE_DMA_NAME = "axi_dma_1"
+VOICE_DMA_NAME = "axi_dma_0"
 
-# Active public-dataset label semantics used by current gesture npy set.
-DEFAULT_GESTURE_LABELS = [
+GESTURE_LABELS = [
     "WALKING",
     "WALKING_UPSTAIRS",
     "WALKING_DOWNSTAIRS",
@@ -30,34 +34,20 @@ DEFAULT_GESTURE_LABELS = [
     "STANDING",
     "LAYING",
 ]
-VOICE_LABELS = [
-    "marvin", 
-    "sheila", 
-    "visual"
-]
+VOICE_LABELS = ["marvin", "sheila", "visual"]
 
 
 @dataclass
 class EvalResult:
-    # Number of evaluated samples.
     total: int
-    # Number of correct predictions.
     correct: int
-    # Confusion matrix [true, pred].
     cm: np.ndarray
-    # Per-sample end-to-end latency in ms (prep + control + DMA path).
     total_ms: List[float]
-    # Per-sample preprocessing/packing overhead in ms.
     prep_ms: List[float]
-    # Per-sample AXI-Lite start/control overhead in ms.
     ctrl_ms: List[float]
-    # Per-sample DMA communication overhead in ms.
     comm_ms: List[float]
-    # Per-sample inference path time in ms (control + communication).
     inference_ms: List[float]
-    # Per-sample DMA submit overhead in ms.
     dma_submit_ms: List[float]
-    # Per-sample DMA wait overhead in ms.
     dma_wait_ms: List[float]
 
     @property
@@ -65,35 +55,30 @@ class EvalResult:
         return 100.0 * self.correct / max(self.total, 1)
 
 
+# -------------------------
+# Hardware helper functions
+# -------------------------
 def q88_pack_u32(x: np.ndarray) -> np.ndarray:
-    """Pack float array to signed Q8.8 in low 16 bits of uint32 AXIS words."""
-    # Clip to representable Q8.8 range, then scale by 2^8.
+    """Pack float values to signed Q8.8 in AXIS data[15:0] (uint32 words)."""
     q = np.round(np.clip(x, -128.0, 127.99609375) * 256.0).astype(np.int32)
-    # Keep only low 16 bits (two's complement int16 payload in AXIS data[15:0]).
-    q16 = (q & 0xFFFF).astype(np.uint32)
-    return q16
+    return (q & 0xFFFF).astype(np.uint32)
 
 
 def reset_dma(dma) -> None:
-    # Reset both TX (MM2S) and RX (S2MM) channels.
+    # Reset MM2S and S2MM channels, then return both to run state.
     for ch in [dma.sendchannel, dma.recvchannel]:
-        mmio = ch._mmio
-        off = ch._offset
-        mmio.write(off + 0x00, 0x4)  # reset
+        ch._mmio.write(ch._offset + 0x00, 0x4)
     time.sleep(0.01)
-    # Put both channels back into run state.
     for ch in [dma.sendchannel, dma.recvchannel]:
-        mmio = ch._mmio
-        off = ch._offset
-        mmio.write(off + 0x00, 0x1)  # run
+        ch._mmio.write(ch._offset + 0x00, 0x1)
     time.sleep(0.01)
 
 
 def run_dma(dma, in_buf, out_buf, timeout_s: float) -> Tuple[float, float, float]:
-    # Ensure input is committed to memory and output cache is invalidated.
     in_buf.flush()
     out_buf.invalidate()
-    # Start receive before send to reduce backpressure/stall risk.
+
+    # Start RX first to avoid initial backpressure.
     t_submit0 = time.perf_counter()
     dma.recvchannel.transfer(out_buf)
     dma.sendchannel.transfer(in_buf)
@@ -105,23 +90,21 @@ def run_dma(dma, in_buf, out_buf, timeout_s: float) -> Tuple[float, float, float
             break
         if time.perf_counter() - t_wait0 > timeout_s:
             raise TimeoutError("DMA timeout")
-        time.sleep(0.001)
+        # Avoid fixed sleep granularity here; it can dominate short-latency measurements.
+        pass
 
     dma.sendchannel.wait()
     dma.recvchannel.wait()
     wait_ms = (time.perf_counter() - t_wait0) * 1000.0
-    # Refresh output buffer view on CPU side.
     out_buf.invalidate()
     return submit_ms, wait_ms, submit_ms + wait_ms
 
 
 def stop_core(core) -> None:
-    # HLS control register at 0x00: clear ap_start/auto_restart.
     core.write(0x00, 0x00)
 
 
 def start_core(core) -> None:
-    # HLS control register at 0x00: single-shot ap_start=1.
     core.write(0x00, 0x01)
 
 
@@ -132,12 +115,16 @@ def _read_text(path: str) -> Optional[str]:
         return None
 
 
-def _write_text(path: str, value: str) -> bool:
+def read_power_w(path: Optional[str], scale: float) -> Optional[float]:
+    if not path:
+        return None
+    txt = _read_text(path)
+    if txt is None:
+        return None
     try:
-        Path(path).write_text(value, encoding="utf-8")
-        return True
-    except Exception:
-        return False
+        return float(txt) * scale
+    except ValueError:
+        return None
 
 
 def get_cpu_governor() -> Optional[str]:
@@ -156,33 +143,46 @@ def get_cpu_freq_khz() -> Optional[int]:
 
 def set_cpu_governor(governor: str) -> bool:
     ok = True
-    gov_paths = sorted(glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor"))
+    gov_paths = sorted(Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_governor"))
     if not gov_paths:
         return False
     for path in gov_paths:
-        ok = _write_text(path, governor) and ok
+        try:
+            path.write_text(governor, encoding="utf-8")
+        except Exception:
+            ok = False
     return ok
 
 
 def set_cpu_freq_khz(freq_khz: int) -> bool:
-    ok = True
-    set_paths = sorted(glob.glob("/sys/devices/system/cpu/cpufreq/policy*/scaling_setspeed"))
+    # Preferred path: userspace governor + scaling_setspeed.
+    set_paths = sorted(Path("/sys/devices/system/cpu/cpufreq").glob("policy*/scaling_setspeed"))
     if not set_paths:
-        set_paths = sorted(glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_setspeed"))
-    if not set_paths:
+        set_paths = sorted(Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_setspeed"))
+    if set_paths:
+        ok = True
+        for path in set_paths:
+            try:
+                path.write_text(str(freq_khz), encoding="utf-8")
+            except Exception:
+                ok = False
+        if ok:
+            return True
+
+    # Fallback path: pin min=max for current policy (works on many cpufreq-dt setups).
+    min_paths = sorted(Path("/sys/devices/system/cpu/cpufreq").glob("policy*/scaling_min_freq"))
+    max_paths = sorted(Path("/sys/devices/system/cpu/cpufreq").glob("policy*/scaling_max_freq"))
+    if not min_paths or not max_paths or len(min_paths) != len(max_paths):
         return False
-    for path in set_paths:
-        ok = _write_text(path, str(freq_khz)) and ok
+
+    ok = True
+    for min_p, max_p in zip(min_paths, max_paths):
+        try:
+            min_p.write_text(str(freq_khz), encoding="utf-8")
+            max_p.write_text(str(freq_khz), encoding="utf-8")
+        except Exception:
+            ok = False
     return ok
-
-
-def get_pl_clock_mhz() -> Optional[float]:
-    try:
-        from pynq.ps import Clocks  # type: ignore
-
-        return float(Clocks.fclk0_mhz)
-    except Exception:
-        return None
 
 
 def set_pl_clock_mhz(clock_mhz: float) -> bool:
@@ -195,107 +195,29 @@ def set_pl_clock_mhz(clock_mhz: float) -> bool:
         return False
 
 
-def _stats(values: Sequence[float], key: str) -> Dict[str, float]:
-    arr = np.asarray(values, dtype=np.float64)
-    if arr.size == 0:
-        return {
-            f"{key}_mean_ms": 0.0,
-            f"{key}_p50_ms": 0.0,
-            f"{key}_p90_ms": 0.0,
-            f"{key}_p99_ms": 0.0,
-            f"{key}_max_ms": 0.0,
-        }
-    return {
-        f"{key}_mean_ms": float(arr.mean()),
-        f"{key}_p50_ms": float(np.percentile(arr, 50)),
-        f"{key}_p90_ms": float(np.percentile(arr, 90)),
-        f"{key}_p99_ms": float(np.percentile(arr, 99)),
-        f"{key}_max_ms": float(arr.max()),
-    }
-
-
-def read_power_w(path: Optional[str], scale: float) -> Optional[float]:
-    if not path:
-        return None
-    txt = _read_text(path)
-    if txt is None:
-        return None
+def get_pl_clock_mhz() -> Optional[float]:
     try:
-        return float(txt) * scale
-    except ValueError:
+        from pynq.ps import Clocks  # type: ignore
+
+        return float(Clocks.fclk0_mhz)
+    except Exception:
         return None
 
 
-def configure_runtime_controls(args) -> Dict[str, object]:
-    info: Dict[str, object] = {
-        "requested": {
-            "cpu_governor": args.cpu_governor,
-            "cpu_freq_khz": args.cpu_freq_khz,
-            "pl_clock_mhz": args.pl_clock_mhz,
-            "power_w": args.power_w,
-            "power_sysfs_path": args.power_sysfs_path,
-            "power_sysfs_scale": args.power_sysfs_scale,
-        },
-        "before": {
-            "cpu_governor": get_cpu_governor(),
-            "cpu_freq_khz": get_cpu_freq_khz(),
-            "pl_clock_mhz": get_pl_clock_mhz(),
-            "power_w": read_power_w(args.power_sysfs_path, args.power_sysfs_scale),
-        },
-        "applied": {
-            "cpu_governor_set": False,
-            "cpu_freq_set": False,
-            "pl_clock_set": False,
-        },
-        "after": {},
-        "warnings": [],
-    }
-    warnings = info["warnings"]
-    assert isinstance(warnings, list)
-
-    if args.cpu_governor:
-        ok = set_cpu_governor(args.cpu_governor)
-        info["applied"]["cpu_governor_set"] = ok
-        if not ok:
-            warnings.append("Unable to set CPU governor (need root or unsupported cpufreq).")
-
-    if args.cpu_freq_khz is not None:
-        ok = set_cpu_freq_khz(args.cpu_freq_khz)
-        info["applied"]["cpu_freq_set"] = ok
-        if not ok:
-            warnings.append(
-                "Unable to set CPU frequency (use userspace governor and root privileges)."
-            )
-
-    if args.pl_clock_mhz is not None:
-        ok = set_pl_clock_mhz(args.pl_clock_mhz)
-        info["applied"]["pl_clock_set"] = ok
-        if not ok:
-            warnings.append("Unable to set PL clock (Clocks API unavailable or permission denied).")
-
-    info["after"] = {
-        "cpu_governor": get_cpu_governor(),
-        "cpu_freq_khz": get_cpu_freq_khz(),
-        "pl_clock_mhz": get_pl_clock_mhz(),
-        "power_w": read_power_w(args.power_sysfs_path, args.power_sysfs_scale),
-    }
-    return info
-
-
+# -------------------------
+# Data loading
+# -------------------------
 def read_gesture_npy(
     features_path: str,
     labels_path: str,
     max_samples: int,
-    num_classes: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Load gesture windows from npy files. Supports [N,60,6] or [N,6,60] feature layouts."""
+    """Load gesture windows and normalize layout to [N, 60, 6]."""
     X = np.load(features_path).astype(np.float32)
     y = np.load(labels_path).astype(np.int64).reshape(-1)
 
     if X.ndim != 3:
-        raise ValueError(f"Gesture npy must be rank-3, got shape {X.shape}")
-
-    # Canonical internal layout is [N,60,6].
+        raise ValueError(f"Gesture npy must be rank-3, got {X.shape}")
     if X.shape[1:] == (60, 6):
         Xw = X
     elif X.shape[1:] == (6, 60):
@@ -309,69 +231,36 @@ def read_gesture_npy(
     Xw = Xw[:n]
     y = y[:n]
 
-    keep = (y >= 0) & (y < num_classes)
-    Xw = Xw[keep]
-    y = y[keep]
-
+    # Keep only labels represented by current 6-class gesture model.
+    valid = (y >= 0) & (y < len(GESTURE_LABELS))
+    Xw = Xw[valid]
+    y = y[valid]
     if len(Xw) == 0:
         raise RuntimeError("No valid gesture samples after label filtering.")
     return Xw, y
 
 
-def pretty_cm(cm: np.ndarray, labels: Sequence[str]) -> None:
-    # Compact text-table confusion matrix printer for terminal logs.
-    header = "true\\pred | " + " ".join([f"{l[:6]:>6}" for l in labels])
-    print(header)
-    print("-" * len(header))
-    for i, label in enumerate(labels):
-        row = " ".join([f"{int(cm[i, j]):6d}" for j in range(len(labels))])
-        print(f"{label[:9]:>9} | {row}")
+def read_voice_npy(
+    features_path: str,
+    labels_path: str,
+    max_samples: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    X = np.load(features_path).astype(np.float32)
+    y = np.load(labels_path).astype(np.int64).reshape(-1)
+    n = min(len(X), len(y))
+    if max_samples > 0:
+        n = min(n, max_samples)
+    return X[:n], y[:n]
 
 
-def load_gesture_labels(
-    labels_file: Optional[str],
-    num_classes: Optional[int],
-) -> List[str]:
-    """
-    Resolve gesture label names in priority order:
-    1) --gesture-labels-file (one label per line, index = line number)
-    2) legacy defaults
-    """
-    labels: List[str] = []
-
-    if labels_file:
-        with open(labels_file, "r", encoding="utf-8") as f:
-            labels = [ln.strip() for ln in f if ln.strip()]
-
-    if not labels:
-        if num_classes is not None and num_classes > 0:
-            labels = [f"class_{i}" for i in range(num_classes)]
-        else:
-            labels = list(DEFAULT_GESTURE_LABELS)
-
-    if num_classes is not None:
-        if num_classes <= 0:
-            raise ValueError("--gesture-num-classes must be > 0")
-        if len(labels) < num_classes:
-            labels.extend([f"class_{i}" for i in range(len(labels), num_classes)])
-        elif len(labels) > num_classes:
-            labels = labels[:num_classes]
-
-    return labels
-
-
-def run_gesture_eval(
-    gesture_core,
-    gesture_dma,
-    X: np.ndarray,
-    y: np.ndarray,
-    timeout_s: float,
-    gesture_pack: str,
-    num_classes: int,
-) -> EvalResult:
+# -------------------------
+# Evaluation loops
+# -------------------------
+def run_gesture_eval(gesture_core, gesture_dma, X: np.ndarray, y: np.ndarray, timeout_s: float) -> EvalResult:
     n = len(X)
-    # Rows=true class, cols=predicted class.
+    num_classes = len(GESTURE_LABELS)
     cm = np.zeros((num_classes, num_classes), dtype=np.int32)
+
     total_ms: List[float] = []
     prep_ms: List[float] = []
     ctrl_ms: List[float] = []
@@ -381,34 +270,23 @@ def run_gesture_eval(
     dma_wait_ms: List[float] = []
     correct = 0
 
-    if gesture_pack == "q88":
-        in_buffer = allocate(shape=(60 * 6,), dtype=np.uint32)
-    else:
-        in_buffer = allocate(shape=(60 * 6,), dtype=np.float32)
+    in_buffer = allocate(shape=(60 * 6,), dtype=np.uint32)
     out_buffer = allocate(shape=(1,), dtype=np.uint32)
 
     try:
         for i in range(n):
             t_total0 = time.perf_counter()
 
-            # Flatten in [time][channel] order, matching HLS stream loop order.
+            # Gesture stream order is [time][channel], flattened.
             t_prep0 = time.perf_counter()
-            flat = X[i].reshape(-1).astype(np.float32)  # [t][c] flatten
-
-            if gesture_pack == "q88":
-                payload = q88_pack_u32(flat)
-            else:
-                payload = flat
-            np.copyto(in_buffer, payload)
+            flat = X[i].reshape(-1).astype(np.float32)
+            np.copyto(in_buffer, q88_pack_u32(flat))
             prep = (time.perf_counter() - t_prep0) * 1000.0
 
-            # Inference path timing includes control start + communication.
             t_ctrl0 = time.perf_counter()
             start_core(gesture_core)
             ctrl = (time.perf_counter() - t_ctrl0) * 1000.0
-            dma_submit, dma_wait, comm = run_dma(
-                gesture_dma, in_buffer, out_buffer, timeout_s=timeout_s
-            )
+            dma_submit, dma_wait, comm = run_dma(gesture_dma, in_buffer, out_buffer, timeout_s=timeout_s)
             total = (time.perf_counter() - t_total0) * 1000.0
 
             prep_ms.append(prep)
@@ -418,11 +296,11 @@ def run_gesture_eval(
             total_ms.append(total)
             dma_submit_ms.append(dma_submit)
             dma_wait_ms.append(dma_wait)
-            pred = int(out_buffer[0])
 
-            # Defensive fallback if hardware returns invalid class id.
+            pred = int(out_buffer[0])
             if pred < 0 or pred >= num_classes:
                 pred = 0
+
             yt = int(y[i])
             cm[yt, pred] += 1
             correct += int(pred == yt)
@@ -447,18 +325,11 @@ def run_gesture_eval(
     )
 
 
-def run_voice_eval(
-    voice_core,
-    voice_dma,
-    X: np.ndarray,
-    y: np.ndarray,
-    timeout_s: float,
-    voice_pack: str,
-    voice_order: str,
-) -> EvalResult:
+def run_voice_eval(voice_core, voice_dma, X: np.ndarray, y: np.ndarray, timeout_s: float) -> EvalResult:
     n = len(X)
-    n_classes = len(VOICE_LABELS)
-    cm = np.zeros((n_classes, n_classes), dtype=np.int32)
+    num_classes = len(VOICE_LABELS)
+    cm = np.zeros((num_classes, num_classes), dtype=np.int32)
+
     total_ms: List[float] = []
     prep_ms: List[float] = []
     ctrl_ms: List[float] = []
@@ -468,38 +339,24 @@ def run_voice_eval(
     dma_wait_ms: List[float] = []
     correct = 0
 
-    if voice_pack == "q88":
-        in_buffer = allocate(shape=(40 * 50,), dtype=np.uint32)
-    else:
-        in_buffer = allocate(shape=(40 * 50,), dtype=np.float32)
+    in_buffer = allocate(shape=(40 * 50,), dtype=np.uint32)
     out_buffer = allocate(shape=(1,), dtype=np.uint32)
 
     try:
         for i in range(n):
             t_total0 = time.perf_counter()
 
+            # Voice model expects [time][channel], i.e. transpose [40,50] -> [50,40].
             t_prep0 = time.perf_counter()
-            feat = X[i].astype(np.float32)  # [40, 50]
-            if voice_order == "tc":
-                # HLS expects time-major stream [t][c].
-                flat = feat.T.reshape(-1).astype(np.float32)  # [t][c]
-            else:
-                # Optional fallback for overlays that consume channel-major stream.
-                flat = feat.reshape(-1).astype(np.float32)  # [c][t]
-
-            if voice_pack == "q88":
-                payload = q88_pack_u32(flat)
-            else:
-                payload = flat
-            np.copyto(in_buffer, payload)
+            feat = X[i].astype(np.float32)
+            flat = feat.T.reshape(-1).astype(np.float32)
+            np.copyto(in_buffer, q88_pack_u32(flat))
             prep = (time.perf_counter() - t_prep0) * 1000.0
 
             t_ctrl0 = time.perf_counter()
             start_core(voice_core)
             ctrl = (time.perf_counter() - t_ctrl0) * 1000.0
-            dma_submit, dma_wait, comm = run_dma(
-                voice_dma, in_buffer, out_buffer, timeout_s=timeout_s
-            )
+            dma_submit, dma_wait, comm = run_dma(voice_dma, in_buffer, out_buffer, timeout_s=timeout_s)
             total = (time.perf_counter() - t_total0) * 1000.0
 
             prep_ms.append(prep)
@@ -509,13 +366,12 @@ def run_voice_eval(
             total_ms.append(total)
             dma_submit_ms.append(dma_submit)
             dma_wait_ms.append(dma_wait)
-            pred = int(out_buffer[0])
 
-            if pred < 0 or pred >= n_classes:
+            pred = int(out_buffer[0])
+            if pred < 0 or pred >= num_classes:
                 pred = 0
             yt = int(y[i])
-            # Ignore samples whose labels are outside configured class range.
-            if yt < 0 or yt >= n_classes:
+            if yt < 0 or yt >= num_classes:
                 continue
             cm[yt, pred] += 1
             correct += int(pred == yt)
@@ -540,8 +396,29 @@ def run_voice_eval(
     )
 
 
+# -------------------------
+# Reporting helpers
+# -------------------------
+def _stats(values: Sequence[float], key: str) -> Dict[str, float]:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0:
+        return {
+            f"{key}_mean_ms": 0.0,
+            f"{key}_p50_ms": 0.0,
+            f"{key}_p90_ms": 0.0,
+            f"{key}_p99_ms": 0.0,
+            f"{key}_max_ms": 0.0,
+        }
+    return {
+        f"{key}_mean_ms": float(arr.mean()),
+        f"{key}_p50_ms": float(np.percentile(arr, 50)),
+        f"{key}_p90_ms": float(np.percentile(arr, 90)),
+        f"{key}_p99_ms": float(np.percentile(arr, 99)),
+        f"{key}_max_ms": float(arr.max()),
+    }
+
+
 def summarize(result: EvalResult, power_w: Optional[float] = None) -> Dict[str, float]:
-    # Build JSON-friendly aggregate metrics used by the final report.
     out: Dict[str, float] = {
         "total": int(result.total),
         "correct": int(result.correct),
@@ -555,7 +432,7 @@ def summarize(result: EvalResult, power_w: Optional[float] = None) -> Dict[str, 
     out.update(_stats(result.dma_submit_ms, "latency_dma_submit"))
     out.update(_stats(result.dma_wait_ms, "latency_dma_wait"))
 
-    # Backward-compatible aliases used by earlier reports.
+    # Backward-compatible aliases used by older scripts/reports.
     out["latency_mean_ms"] = out["latency_total_mean_ms"]
     out["latency_p50_ms"] = out["latency_total_p50_ms"]
     out["latency_p90_ms"] = out["latency_total_p90_ms"]
@@ -571,42 +448,35 @@ def summarize(result: EvalResult, power_w: Optional[float] = None) -> Dict[str, 
     return out
 
 
-def parse_args():
+def pretty_cm(cm: np.ndarray, labels: Sequence[str]) -> None:
+    header = "true\\pred | " + " ".join([f"{l[:6]:>6}" for l in labels])
+    print(header)
+    print("-" * len(header))
+    for i, label in enumerate(labels):
+        row = " ".join([f"{int(cm[i, j]):6d}" for j in range(len(labels))])
+        print(f"{label[:9]:>9} | {row}")
+
+
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Dual CNN hardware test on Ultra96 (PYNQ)")
     p.add_argument("--xsa-path", default=DEFAULT_XSA)
+    p.add_argument("--mode", choices=["gesture", "voice", "both"], default="both")
 
-    p.add_argument("--gesture-core", default="gesture_cnn_0")
-    p.add_argument("--voice-core", default="voice_cnn_0")
-    p.add_argument("--gesture-dma", default="axi_dma_1")
-    p.add_argument("--voice-dma", default="axi_dma_0")
-
-    # Active default path uses npy test sets for both subsystems.
     p.add_argument("--gesture-features", default=DEFAULT_GESTURE_X)
     p.add_argument("--gesture-labels", default=DEFAULT_GESTURE_Y)
-    p.add_argument("--gesture-labels-file", default=None)
-    p.add_argument("--gesture-num-classes", type=int, default=None)
     p.add_argument("--voice-features", default=DEFAULT_VOICE_X)
     p.add_argument("--voice-labels", default=DEFAULT_VOICE_Y)
     p.add_argument("--gesture-max-samples", type=int, default=120)
     p.add_argument("--voice-max-samples", type=int, default=300)
+
     p.add_argument("--timeout-s", type=float, default=2.0)
-
-    p.add_argument("--mode", choices=["gesture", "voice", "both"], default="both")
-    # Packing mode controls how PS encodes input stream payload for each core.
-    # Default is q88 for both to match hardware stream format.
-    p.add_argument("--gesture-pack", choices=["q88", "float32"], default="q88")
-    p.add_argument("--voice-pack", choices=["float32", "q88"], default="q88")
-    # Voice feature flattening order: "tc" matches current HLS implementation.
-    p.add_argument("--voice-order", choices=["tc", "ct"], default="tc")
-
     p.add_argument("--save-dir", default=DEFAULT_OUTDIR)
     p.add_argument("--tag", default="")
-
-    # Power-management / runtime control knobs (best-effort).
-    p.add_argument("--cpu-governor", default=None, help="Set Linux CPU governor (e.g. performance/userspace).")
-    p.add_argument("--cpu-freq-khz", type=int, default=None, help="Set CPU frequency in kHz (requires userspace governor).")
-    p.add_argument("--pl-clock-mhz", type=float, default=None, help="Set PL FCLK0 in MHz via PYNQ Clocks API.")
-    p.add_argument("--power-w", type=float, default=None, help="Manual board power in Watts for energy estimates.")
+    p.add_argument("--cpu-governor", default=None, help="Set Linux CPU governor, e.g. userspace/performance.")
+    p.add_argument("--cpu-freq-khz", type=int, default=None, help="Set PS CPU frequency in kHz.")
+    p.add_argument("--pl-clock-mhz", type=float, default=None, help="Set PL FCLK0 frequency in MHz.")
+    # Power can be provided manually or read from a sysfs sensor file.
+    p.add_argument("--power-w", type=float, default=None, help="Manual board power in Watts.")
     p.add_argument("--power-sysfs-path", default=None, help="Sysfs file containing power reading.")
     p.add_argument(
         "--power-sysfs-scale",
@@ -626,31 +496,80 @@ def main() -> None:
     out_dir = Path(args.save_dir) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    runtime_ctrl = configure_runtime_controls(args)
     measured_power_w = read_power_w(args.power_sysfs_path, args.power_sysfs_scale)
     power_w = args.power_w if args.power_w is not None else measured_power_w
+    if power_w is not None:
+        print(f"Using power for energy estimates: {power_w:.4f} W")
 
-    print("Runtime controls:", json.dumps(runtime_ctrl["requested"]))
-    if runtime_ctrl["warnings"]:
-        for msg in runtime_ctrl["warnings"]:
-            print("[WARN]", msg)
+    runtime_controls = {
+        "requested": {
+            "cpu_governor": args.cpu_governor,
+            "cpu_freq_khz": args.cpu_freq_khz,
+            "pl_clock_mhz": args.pl_clock_mhz,
+        },
+        "before": {
+            "cpu_governor": get_cpu_governor(),
+            "cpu_freq_khz": get_cpu_freq_khz(),
+            "pl_clock_mhz": get_pl_clock_mhz(),
+        },
+        "applied": {
+            "cpu_governor_set": False,
+            "cpu_freq_set": False,
+            "pl_clock_set": False,
+        },
+        "after": {},
+        "warnings": [],
+    }
+
+    if args.cpu_governor:
+        ok = set_cpu_governor(args.cpu_governor)
+        runtime_controls["applied"]["cpu_governor_set"] = ok
+        if not ok:
+            runtime_controls["warnings"].append("Unable to set CPU governor.")
+
+    if args.cpu_freq_khz is not None:
+        ok = set_cpu_freq_khz(args.cpu_freq_khz)
+        runtime_controls["applied"]["cpu_freq_set"] = ok
+        if not ok:
+            runtime_controls["warnings"].append(
+                "Unable to set CPU frequency (setspeed/min-max paths unavailable or permission denied)."
+            )
 
     print(f"Loading overlay: {args.xsa_path}")
     overlay = Overlay(args.xsa_path)
-    # Helpful for debugging name mismatches in CLI arguments.
     print("Available IP blocks:", ", ".join(sorted(overlay.ip_dict.keys())))
 
-    gesture_core = getattr(overlay, args.gesture_core)
-    voice_core = getattr(overlay, args.voice_core)
-    gesture_dma = getattr(overlay, args.gesture_dma)
-    voice_dma = getattr(overlay, args.voice_dma)
+    # Apply PL clock after overlay load so bitstream load does not overwrite the request.
+    if args.pl_clock_mhz is not None:
+        ok = set_pl_clock_mhz(args.pl_clock_mhz)
+        runtime_controls["applied"]["pl_clock_set"] = ok
+        if not ok:
+            runtime_controls["warnings"].append("Unable to set PL clock.")
 
-    # Start from known clean state.
+    runtime_controls["after"] = {
+        "cpu_governor": get_cpu_governor(),
+        "cpu_freq_khz": get_cpu_freq_khz(),
+        "pl_clock_mhz": get_pl_clock_mhz(),
+    }
+    after_cpu = runtime_controls["after"]["cpu_freq_khz"]
+    if after_cpu is not None:
+        print(f"CPU freq readback: {int(after_cpu)} kHz")
+    after_pl = runtime_controls["after"]["pl_clock_mhz"]
+    if after_pl is not None:
+        print(f"PL clock readback (FCLK0): {float(after_pl):.2f} MHz")
+
+    for msg in runtime_controls["warnings"]:
+        print("[WARN]", msg)
+
+    gesture_core = getattr(overlay, GESTURE_CORE_NAME)
+    voice_core = getattr(overlay, VOICE_CORE_NAME)
+    gesture_dma = getattr(overlay, GESTURE_DMA_NAME)
+    voice_dma = getattr(overlay, VOICE_DMA_NAME)
+
+    # Start from a known clean state.
     stop_core(gesture_core)
     stop_core(voice_core)
-
     reset_dma(gesture_dma)
-    # Avoid double-reset if both names point to the same DMA object.
     if voice_dma is not gesture_dma:
         reset_dma(voice_dma)
 
@@ -658,36 +577,35 @@ def main() -> None:
         "run_id": run_id,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": vars(args),
-        "runtime_controls": runtime_ctrl,
+        "runtime_controls": runtime_controls,
+        "overlay": {
+            "gesture_core": GESTURE_CORE_NAME,
+            "voice_core": VOICE_CORE_NAME,
+            "gesture_dma": GESTURE_DMA_NAME,
+            "voice_dma": VOICE_DMA_NAME,
+            "input_pack": "q88",
+            "voice_input_order": "tc",
+        },
+        "power": {
+            "manual_w": args.power_w,
+            "sysfs_path": args.power_sysfs_path,
+            "sysfs_scale": args.power_sysfs_scale,
+            "measured_w": measured_power_w,
+            "used_w": power_w,
+        },
     }
 
     try:
         if args.mode in ("gesture", "both"):
-            if not args.gesture_features or not args.gesture_labels:
-                raise ValueError("Gesture evaluation requires --gesture-features and --gesture-labels (.npy).")
-            gesture_labels = load_gesture_labels(
-                labels_file=args.gesture_labels_file,
-                num_classes=args.gesture_num_classes,
-            )
-            num_gesture_classes = len(gesture_labels)
-
             Xg, yg = read_gesture_npy(
                 features_path=args.gesture_features,
                 labels_path=args.gesture_labels,
                 max_samples=args.gesture_max_samples,
-                num_classes=num_gesture_classes,
             )
             print(f"\nRunning gesture test: {len(Xg)} samples")
-            gres = run_gesture_eval(
-                gesture_core=gesture_core,
-                gesture_dma=gesture_dma,
-                X=Xg,
-                y=yg,
-                timeout_s=args.timeout_s,
-                gesture_pack=args.gesture_pack,
-                num_classes=num_gesture_classes,
-            )
+            gres = run_gesture_eval(gesture_core, gesture_dma, Xg, yg, timeout_s=args.timeout_s)
             gsum = summarize(gres, power_w=power_w)
+
             print("Gesture accuracy:", f"{gsum['accuracy_pct']:.2f}%")
             print(
                 "Gesture timing mean(ms):",
@@ -696,34 +614,24 @@ def main() -> None:
                 f"comm={gsum['latency_comm_mean_ms']:.3f},",
                 f"prep={gsum['latency_prep_mean_ms']:.3f}",
             )
-            pretty_cm(gres.cm, gesture_labels)
+            pretty_cm(gres.cm, GESTURE_LABELS)
             report["gesture"] = {
                 "summary": gsum,
-                "labels": gesture_labels,
+                "labels": GESTURE_LABELS,
                 "confusion_matrix": gres.cm.tolist(),
             }
-            # Stop unused core before moving to next workload.
             stop_core(gesture_core)
 
         if args.mode in ("voice", "both"):
-            Xv = np.load(args.voice_features).astype(np.float32)
-            yv = np.load(args.voice_labels).astype(np.int64)
-            n = len(Xv)
-            if args.voice_max_samples > 0:
-                n = min(n, args.voice_max_samples)
-            Xv = Xv[:n]
-            yv = yv[:n]
-            print(f"\nRunning voice test: {len(Xv)} samples")
-            vres = run_voice_eval(
-                voice_core=voice_core,
-                voice_dma=voice_dma,
-                X=Xv,
-                y=yv,
-                timeout_s=args.timeout_s,
-                voice_pack=args.voice_pack,
-                voice_order=args.voice_order,
+            Xv, yv = read_voice_npy(
+                features_path=args.voice_features,
+                labels_path=args.voice_labels,
+                max_samples=args.voice_max_samples,
             )
+            print(f"\nRunning voice test: {len(Xv)} samples")
+            vres = run_voice_eval(voice_core, voice_dma, Xv, yv, timeout_s=args.timeout_s)
             vsum = summarize(vres, power_w=power_w)
+
             print("Voice accuracy:", f"{vsum['accuracy_pct']:.2f}%")
             print(
                 "Voice timing mean(ms):",
@@ -738,15 +646,13 @@ def main() -> None:
                 "confusion_matrix": vres.cm.tolist(),
             }
             stop_core(voice_core)
-
     finally:
-        # Always force-stop cores on exit/error to avoid stale running state.
+        # Always stop both cores even if an exception occurs.
         stop_core(gesture_core)
         stop_core(voice_core)
 
     summary_path = out_dir / "summary.json"
-    # Store one artifact containing config + metrics + confusion matrices.
-    summary_path.write_text(json.dumps(report, indent=2))
+    summary_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nSaved report: {summary_path}")
 
 
