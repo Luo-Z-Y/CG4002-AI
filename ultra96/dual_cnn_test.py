@@ -115,16 +115,23 @@ def _read_text(path: str) -> Optional[str]:
         return None
 
 
-def read_power_w(path: Optional[str], scale: float) -> Optional[float]:
-    if not path:
-        return None
-    txt = _read_text(path)
-    if txt is None:
-        return None
-    try:
-        return float(txt) * scale
-    except ValueError:
-        return None
+def read_total_power_w() -> Tuple[Optional[float], List[str]]:
+    """Read and sum all hwmon rail power*_input files, returning Watts."""
+    paths = sorted(Path("/sys/class/hwmon").glob("hwmon*/power*_input"))
+    total_uw = 0.0
+    used_paths: List[str] = []
+    for p in paths:
+        txt = _read_text(str(p))
+        if txt is None:
+            continue
+        try:
+            total_uw += float(txt)
+            used_paths.append(str(p))
+        except ValueError:
+            continue
+    if not used_paths:
+        return None, []
+    return total_uw * 1e-6, used_paths
 
 
 def get_cpu_governor() -> Optional[str]:
@@ -475,14 +482,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cpu-governor", default=None, help="Set Linux CPU governor, e.g. userspace/performance.")
     p.add_argument("--cpu-freq-khz", type=int, default=None, help="Set PS CPU frequency in kHz.")
     p.add_argument("--pl-clock-mhz", type=float, default=None, help="Set PL FCLK0 frequency in MHz.")
-    # Power can be provided manually or read from a sysfs sensor file.
-    p.add_argument("--power-w", type=float, default=None, help="Manual board power in Watts.")
-    p.add_argument("--power-sysfs-path", default=None, help="Sysfs file containing power reading.")
     p.add_argument(
-        "--power-sysfs-scale",
-        type=float,
-        default=1.0,
-        help="Scale multiplier for --power-sysfs-path (e.g. 1e-6 for microwatts).",
+        "--power",
+        action="store_true",
+        help="Sum all hwmon power rails and report total power/energy in Watts/mJ.",
     )
     return p.parse_args()
 
@@ -496,8 +499,12 @@ def main() -> None:
     out_dir = Path(args.save_dir) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    measured_power_w = read_power_w(args.power_sysfs_path, args.power_sysfs_scale)
-    power_w = args.power_w if args.power_w is not None else measured_power_w
+    rail_paths: List[str] = []
+    power_w: Optional[float] = None
+    if args.power:
+        power_w, rail_paths = read_total_power_w()
+        if power_w is None:
+            print("[WARN] --power enabled but no readable hwmon power*_input rails were found.")
     if power_w is not None:
         print(f"Using power for energy estimates: {power_w:.4f} W")
 
@@ -587,11 +594,9 @@ def main() -> None:
             "voice_input_order": "tc",
         },
         "power": {
-            "manual_w": args.power_w,
-            "sysfs_path": args.power_sysfs_path,
-            "sysfs_scale": args.power_sysfs_scale,
-            "measured_w": measured_power_w,
-            "used_w": power_w,
+            "enabled": args.power,
+            "sum_rails_w": power_w,
+            "rail_paths": rail_paths,
         },
     }
 

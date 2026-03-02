@@ -27,9 +27,6 @@ def parse_args() -> argparse.Namespace:
         default="1000000,1200000,1400000",
         help="Comma-separated PS CPU frequency sweep values in kHz.",
     )
-    p.add_argument("--power-w", type=float, default=4.2)
-    p.add_argument("--power-sysfs-path", default="/sys/class/hwmon/hwmon0/power1_input")
-    p.add_argument("--power-sysfs-scale", type=float, default=1e-6)
     p.add_argument("--skip-power", action="store_true", help="Skip power-profiled runs.")
     return p.parse_args()
 
@@ -103,8 +100,7 @@ def build_commands(args: argparse.Namespace, save_dir: Path) -> List[Dict[str, o
     # python dual_cnn_test.py --xsa-path dual_cnn.xsa --save-dir ../report/evidence_dual --gesture-max-samples 120 --voice-max-samples 300 --timeout-s 2.0 --tag assess_both --mode both
     # python dual_cnn_test.py --xsa-path dual_cnn.xsa --save-dir ../report/evidence_dual --gesture-max-samples 120 --voice-max-samples 300 --timeout-s 2.0 --tag assess_pl100 --mode both --pl-clock-mhz 100
     # python dual_cnn_test.py --xsa-path dual_cnn.xsa --save-dir ../report/evidence_dual --gesture-max-samples 120 --voice-max-samples 300 --timeout-s 2.0 --tag assess_ps1200000 --mode both --cpu-governor userspace --cpu-freq-khz 1200000
-    # python dual_cnn_test.py --xsa-path dual_cnn.xsa --save-dir ../report/evidence_dual --gesture-max-samples 120 --voice-max-samples 300 --timeout-s 2.0 --tag assess_power_manual --mode both --power-w 4.2
-    # python dual_cnn_test.py --xsa-path dual_cnn.xsa --save-dir ../report/evidence_dual --gesture-max-samples 120 --voice-max-samples 300 --timeout-s 2.0 --tag assess_power_sysfs --mode both --power-sysfs-path /sys/class/hwmon/hwmon0/power1_input --power-sysfs-scale 1e-6
+    # python dual_cnn_test.py --xsa-path dual_cnn.xsa --save-dir ../report/evidence_dual --gesture-max-samples 120 --voice-max-samples 300 --timeout-s 2.0 --tag assess_power --mode both --power
     #
     # Yes, you can run these plain-text commands directly for assessment.
     # This script is just a wrapper that runs them and bundles results.
@@ -166,37 +162,12 @@ def build_commands(args: argparse.Namespace, save_dir: Path) -> List[Dict[str, o
         )
 
     if not args.skip_power:
-        commands.extend(
-            [
-                {
-                    "tag": f"{args.tag_prefix}_power_manual",
-                    "mode": "both",
-                    "cmd": common
-                    + [
-                        "--tag",
-                        f"{args.tag_prefix}_power_manual",
-                        "--mode",
-                        "both",
-                        "--power-w",
-                        str(args.power_w),
-                    ],
-                },
-                {
-                    "tag": f"{args.tag_prefix}_power_sysfs",
-                    "mode": "both",
-                    "cmd": common
-                    + [
-                        "--tag",
-                        f"{args.tag_prefix}_power_sysfs",
-                        "--mode",
-                        "both",
-                        "--power-sysfs-path",
-                        args.power_sysfs_path,
-                        "--power-sysfs-scale",
-                        str(args.power_sysfs_scale),
-                    ],
-                },
-            ]
+        commands.append(
+            {
+                "tag": f"{args.tag_prefix}_power",
+                "mode": "both",
+                "cmd": common + ["--tag", f"{args.tag_prefix}_power", "--mode", "both", "--power"],
+            }
         )
 
     return commands
@@ -254,9 +225,6 @@ def main() -> int:
             "timeout_s": args.timeout_s,
             "pl_clock_sweep": args.pl_clock_sweep,
             "ps_freq_sweep_khz": args.ps_freq_sweep_khz,
-            "power_w": args.power_w,
-            "power_sysfs_path": args.power_sysfs_path,
-            "power_sysfs_scale": args.power_sysfs_scale,
             "skip_power": args.skip_power,
         },
         "runs": results,
