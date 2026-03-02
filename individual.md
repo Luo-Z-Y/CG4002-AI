@@ -284,6 +284,55 @@ Different:
   - `overlay = Overlay('dual_cnn.xsa')`
 - Resolves IP block names and DMA names dynamically.
 
+### Ultra96 command recipes (directly usable on board)
+Assuming repository is cloned on Ultra96 and you run from repo root:
+
+```bash
+cd ~/CG4002-AI/ultra96
+```
+
+1. Gesture-only hardware test:
+```bash
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode gesture \
+  --gesture-features gesture_X_test.npy \
+  --gesture-labels gesture_y_test.npy \
+  --gesture-pack q88 \
+  --save-dir ../report/evidence_dual \
+  --tag gesture_baseline
+```
+
+2. Voice-only hardware test:
+```bash
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode voice \
+  --voice-features voice_X_test.npy \
+  --voice-labels voice_y_test.npy \
+  --voice-pack q88 \
+  --voice-order tc \
+  --save-dir ../report/evidence_dual \
+  --tag voice_baseline
+```
+
+3. Combined run (both models):
+```bash
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode both \
+  --gesture-pack q88 \
+  --voice-pack q88 \
+  --voice-order tc \
+  --save-dir ../report/evidence_dual \
+  --tag both_baseline
+```
+
+Notes:
+- If overlay block names differ, pass explicit names:
+  - `--gesture-core <name> --voice-core <name> --gesture-dma <name> --voice-dma <name>`
+- Script prints available IP names after loading overlay, which helps resolve naming mismatches.
+
 ### Low-level reads/writes handling
 - Core control via MMIO-style writes:
   - `core.write(0x00, 0x01)` to start
@@ -503,6 +552,28 @@ Key software-side conclusions from notebook evidence:
 
 This directly answers the requirement to include inference and communication overhead.
 
+### Benchmark/evidence command set (Ultra96)
+Single command to run assessment bundle (gesture + voice + both + power-profiled run):
+
+```bash
+cd ~/CG4002-AI/ultra96
+python3 run_assessment_suite.py \
+  --python-bin python3 \
+  --runner dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --save-dir ../report/evidence_dual \
+  --voice-order tc \
+  --cpu-governor performance \
+  --pl-clock-mhz 100 \
+  --power-w 4.2 \
+  --tag-prefix assess
+```
+
+Outputs:
+- Per-run folder with `summary.json`
+- Aggregated bundle:
+  - `../report/evidence_dual/assessment_bundle_*.json`
+
 ### Hardware resource usage
 Latest HLS C-synthesis estimates:
 
@@ -567,6 +638,58 @@ Power/performance control is integrated into `ultra96/dual_cnn_test.py` with run
   - provide measured board power manually
 - `--power-sysfs-path <path>` and `--power-sysfs-scale <scale>`
   - read power from sensor path and scale to Watts
+
+### Runtime control command examples (Ultra96)
+1. Fix CPU governor to performance:
+```bash
+cd ~/CG4002-AI/ultra96
+python3 dual_cnn_test.py --xsa-path dual_cnn.xsa --mode both --cpu-governor performance --tag gov_performance
+```
+
+2. Set userspace governor + CPU frequency (example: 1.2 GHz):
+```bash
+cd ~/CG4002-AI/ultra96
+sudo python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode both \
+  --cpu-governor userspace \
+  --cpu-freq-khz 1200000 \
+  --tag cpu_1200mhz
+```
+
+3. Set PL clock (FCLK0):
+```bash
+cd ~/CG4002-AI/ultra96
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode both \
+  --pl-clock-mhz 100 \
+  --tag pl100
+```
+
+4. Manual power entry for energy estimation:
+```bash
+cd ~/CG4002-AI/ultra96
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode both \
+  --power-w 4.2 \
+  --tag power_manual
+```
+
+5. Read power from sysfs sensor (example path):
+```bash
+cd ~/CG4002-AI/ultra96
+python3 dual_cnn_test.py \
+  --xsa-path dual_cnn.xsa \
+  --mode both \
+  --power-sysfs-path /sys/class/hwmon/hwmon0/power1_input \
+  --power-sysfs-scale 1e-6 \
+  --tag power_sysfs
+```
+
+Practical note:
+- Frequency/governor writes may require root privileges; if unavailable, script continues and records warnings in `runtime_controls.warnings` inside `summary.json`.
 
 The script records before/after settings and warnings under `runtime_controls` in `summary.json`.
 
