@@ -352,6 +352,20 @@ Notes:
 - Vitis HLS C Simulation (C-Sim)
 - Vitis HLS C/RTL Co-simulation (Co-Sim)
 
+### C-Sim vs Co-Sim (key differences)
+- C-Sim:
+  - Runs the C/C++ model only (no generated RTL).
+  - Fastest loop for functional debugging (math correctness, indexing, label mapping, tensor/stream ordering assumptions).
+  - Used early to iterate quickly on algorithm and testbench logic.
+- Co-Sim:
+  - Runs C testbench against synthesized RTL (cycle-accurate hardware model in simulator).
+  - Slower, but validates hardware-equivalent behavior: RTL data path, AXIS handshaking (`TLAST`), output packet count, and C-vs-RTL output agreement.
+  - Used after C-Sim passes, before Vivado integration, to reduce hardware bring-up risk.
+- Practical workflow in this project:
+  1. Pass C-Sim for functional correctness.
+  2. Run Co-Sim to confirm RTL equivalence and stream protocol correctness.
+  3. Proceed to Vivado/Ultra96 deployment once both pass.
+
 ### Testbench structure
 - Voice TB: `hls/voice_cnn_tb.cpp`
 - Gesture TB: `hls/gesture_cnn_tb.cpp`
