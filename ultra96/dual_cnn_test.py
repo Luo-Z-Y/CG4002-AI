@@ -30,7 +30,11 @@ DEFAULT_GESTURE_LABELS = [
     "STANDING",
     "LAYING",
 ]
-VOICE_LABELS = ["marvin", "sheila", "visual"]
+VOICE_LABELS = [
+    "marvin", 
+    "sheila", 
+    "visual"
+]
 
 
 @dataclass

@@ -333,16 +333,49 @@ Notes:
   - `--gesture-core <name> --voice-core <name> --gesture-dma <name> --voice-dma <name>`
 - Script prints available IP names after loading overlay, which helps resolve naming mismatches.
 
-### Low-level reads/writes handling
-- Core control via MMIO-style writes:
-  - `core.write(0x00, 0x01)` to start
-  - `core.write(0x00, 0x00)` to stop
-- DMA control and reset:
-  - writes to DMA channel control register (`offset + 0x00`) for reset/run
-- Data movement:
-  - `sendchannel.transfer(in_buf)`, `recvchannel.transfer(out_buf)`, then `wait()`
-- Buffer coherency:
-  - input `flush()`, output `invalidate()`
+### Low-level reads/writes handling (mapped to `ultra96/dual_cnn_test.py`)
+
+This project uses a standard PS-PL split:
+- AXI-Lite control plane for IP start/stop.
+- AXI DMA + AXI-Stream data plane for tensors and prediction output.
+
+The low-level behavior in software is implemented in:
+- `start_core(...)` / `stop_core(...)` (`ultra96/dual_cnn_test.py:123-125`, `118-120`)
+- `reset_dma(...)` (`ultra96/dual_cnn_test.py:77-89`)
+- `run_dma(...)` (`ultra96/dual_cnn_test.py:92-115`)
+- per-sample loops in `run_gesture_eval(...)` and `run_voice_eval(...)` (`ultra96/dual_cnn_test.py:363+`, `450+`)
+
+Write path (PS -> FPGA):
+1. Input tensor preparation and packing:
+- Gesture and voice samples are flattened to match HLS stream loop order.
+- Gesture uses `[time][channel]` flatten (`run_gesture_eval`), voice uses `tc` (`feat.T`) by default (`run_voice_eval`).
+- In Q8.8 mode, `q88_pack_u32(...)` packs signed Q8.8 values into AXIS `data[15:0]` (`ultra96/dual_cnn_test.py:68-74`).
+2. CPU cache writeback before DMA:
+- `in_buf.flush()` ensures latest CPU writes are visible to DMA (`ultra96/dual_cnn_test.py:94`).
+3. Core start register write:
+- `core.write(0x00, 0x01)` asserts `ap_start` (`start_core`, `ultra96/dual_cnn_test.py:123-125`).
+4. DMA programming (descriptor/control writes under the driver):
+- `dma.recvchannel.transfer(out_buf)` then `dma.sendchannel.transfer(in_buf)` (`ultra96/dual_cnn_test.py:98-99`).
+- Receive is armed before send to avoid backpressure/lost first output beat.
+5. DMA reset/run-state writes when initializing:
+- `mmio.write(offset + 0x00, 0x4)` reset, then `mmio.write(offset + 0x00, 0x1)` run (`ultra96/dual_cnn_test.py:82`, `88`).
+
+Read path (FPGA -> PS):
+1. Status/progress reads:
+- The script does not poll `core.read(0x00)` for `ap_done`.
+- Instead, it polls DMA channel state via `dma.sendchannel.idle` and `dma.recvchannel.idle` (`ultra96/dual_cnn_test.py:104`) and then calls blocking `wait()` on both channels (`ultra96/dual_cnn_test.py:110-111`).
+- Practically, this is the low-level completion read path in current code: DMA-idle/interrupt-backed status exposed by the PYNQ driver.
+2. Output cache invalidation and data read:
+- `out_buf.invalidate()` refreshes CPU view after DMA writes (`ultra96/dual_cnn_test.py:114`).
+- Predicted class is read from memory-mapped output buffer: `pred = int(out_buffer[0])` (`ultra96/dual_cnn_test.py:421`, `512`).
+- This is the actual low-level output read for inference result; the HLS IP emits one AXIS word (class id), and software reads one `uint32` from `out_buffer`.
+3. Defensive read handling:
+- If output class is outside expected range, code clamps/falls back (`pred=0`) to keep confusion-matrix accounting robust (`ultra96/dual_cnn_test.py:424-426`, `514-516`).
+
+Important clarification for assessment explanation:
+- Low-level write is not only `ap_start`; it also includes DMA register programming and buffer coherency operations.
+- Low-level read is not only reading final class memory; it also includes reading DMA completion state (`idle`/`wait`) before consuming output.
+- In this implementation, synchronization is DMA-centric (read DMA status + wait), not AXI-Lite `ap_done` polling.
 
 ### Live Ultra96 run result (current reference run)
 Run context reported by script:
@@ -462,6 +495,11 @@ Gesture augmentation logic (implemented; only executed when CSV is not prebuilt)
   - additional temporal crop for later augment rounds (`i > 5`), then resample
   - final resample to fixed `WINDOW_SIZE = 60`
 - Output is written to `augmented_imudata.csv`.
+- Exact 1->10 mapping meaning:
+  - For each original recording block, the loop runs `for i in range(10)`.
+  - Each `i` creates one full 60-step window with a new `measurement_id`.
+  - `i=0` is near-original (resampled baseline) and `i=1..9` are transformed variants.
+  - Therefore, one source recording produces ten window samples in the augmented CSV (before later validity filtering).
 
 Split and validation details (actual training path):
 - Data is loaded from `CSV_PATH = AUGMENTED_CSV`.
@@ -549,6 +587,17 @@ Voice augmentation logic (implemented in two stages):
   - time masking
   - frequency masking
 - Training builder `build_train_from_base_with_feature_aug(...)` applies feature-level augmentation only to training seed set.
+- Exact 1->3 mapping meaning in active training path:
+  - `AUGMENT_FACTOR = 3` and the builder starts with the original feature tensor (`X_seed`) as one copy.
+  - It then creates `augment_factor - 1 = 2` additional feature copies using `augment_feature_np(...)`.
+  - So each training seed sample yields:
+    - 1 original MFCC feature map `[40,50]`
+    - 2 augmented MFCC feature maps `[40,50]`
+  - Final cardinality is exactly 1->3 for train samples in this path.
+- What the augmented voice samples are (feature-domain):
+  - same class label as source sample
+  - perturbed MFCC map with small additive noise, temporal shift, random time mask, and random frequency mask
+  - this changes local time-frequency patterns while preserving class identity
 
 Split strategy and why it differs from gesture:
 - Voice split is done at original sample index (`manifest_df`) before train augmentation:
