@@ -440,44 +440,60 @@ The software pipeline is implemented in PyTorch and structured to keep deploymen
 
 ### A) Gesture notebook: software implementation details
 
-Data folder and run mode:
-- The notebook automatically chooses the latest dated folder under `../data/gesture`.
-- For the captured run, it used `../data/gesture/27022026`.
-- Since `augmented_imudata.csv` already existed, TXT parsing/resampling/augmentation cells were skipped, and training used the prebuilt dataset directly.
+Data lineage and run mode (from actual notebook flow):
+- Folder selection is automatic via `get_latest_gesture_folder(...)`; captured run used `../data/gesture/27022026`.
+- Control flag is `USE_EXISTING_AUGMENTED_CSV = AUGMENTED_CSV.exists()`.
+- In this run, `augmented_imudata.csv` already existed, so parser/resampler/augmenter cells were skipped and training started from the prebuilt augmented CSV.
 
-Raw parser/resampler/augmenter logic (still implemented in notebook):
-- TXT parsing supports `utf-16`, `utf-8-sig`, `utf-8`; strips null bytes; detects sensor blocks using `HEADER_MARKER = "YPR(deg)-X"`.
-- Sensor rows are validated as 6 numeric values and mapped to:
+If raw-parse path is used (implemented in notebook):
+- `read_log_lines(...)` handles `utf-16`, `utf-8-sig`, and `utf-8`.
+- `extract_recordings(...)` splits recordings by repeated `HEADER_MARKER = "YPR(deg)-X"`.
+- Each sensor row is parsed into six channels:
   - `gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z`
-- Resampling path standardizes each recording to `WINDOW_SIZE = 60`.
-- Augmentation path includes jitter, scale, shift, optional temporal crop, then resample to 60.
+- `parse_and_convert(...)` writes canonical row-wise table with `measurement_id`, `sequence_id`, `label_id`, and 6-axis features.
 
-Training-time window validation and split:
-- A window is accepted only if:
-  - exactly 60 rows
-  - full unique `sequence_id` coverage
-  - no NaN in sequence index
-  - consistent `label_id` within the window
-- Valid windows detected: `7352`.
-- Leakage control: split by `measurement_id` first, not by row.
-- Split strategy:
-  - Train/Test = 80/20 (stratified)
-  - Validation = 10% of train split (stratified)
-- Saved split CSVs:
-  - train rows: `317520`
-  - val rows: `35340`
-  - test rows: `88260`
-- Window tensor shapes:
-  - `X_train_raw = (5292, 60, 6)`
-  - `X_val_raw = (589, 60, 6)`
-  - `X_test_raw = (1471, 60, 6)`
+Gesture augmentation logic (implemented; only executed when CSV is not prebuilt):
+- Function path: `load_all_recordings(...)` -> augmentation loop in section 2.3.
+- `AUGMENT_FACTOR = 10` per raw recording.
+- For each augmented sample:
+  - additive jitter: `np.random.normal(0, 0.05, shape)`
+  - amplitude scaling: uniform `[0.8, 1.2]`
+  - per-channel shift: uniform `[-0.1, 0.1]`
+  - additional temporal crop for later augment rounds (`i > 5`), then resample
+  - final resample to fixed `WINDOW_SIZE = 60`
+- Output is written to `augmented_imudata.csv`.
 
-Normalization and export-aligned artifacts:
-- `StandardScaler` is fit on flattened train windows only.
+Split and validation details (actual training path):
+- Data is loaded from `CSV_PATH = AUGMENTED_CSV`.
+- Valid windows are identified by grouping on `measurement_id` and enforcing:
+  - `len == 60`
+  - non-NaN `sequence_id`
+  - exactly 60 unique sequence positions
+  - constant `label_id` within the window
+- Valid windows detected in this run: `7352`.
+- Split unit is `measurement_id` (window-level), stratified by `label_id`:
+  - first split: train/test (`test_size=0.2`)
+  - second split: train/val from train (`VAL_SIZE=0.1`)
+- Saved split CSV row counts:
+  - train `317520`, val `35340`, test `88260`
+- Built window tensors:
+  - `X_train_raw=(5292,60,6)`, `X_val_raw=(589,60,6)`, `X_test_raw=(1471,60,6)`
+
+Important split characteristic for gesture:
+- Because this run starts from an already-augmented CSV, splitting occurs on augmented windows in that file.
+- Therefore, split correctness is at `measurement_id` granularity inside that CSV snapshot; it is not reconstructing original pre-augmentation parent-child lineage at this stage.
+
+Normalization and training-set construction:
+- `StandardScaler` is fit on flattened train windows only (`X_train_raw.reshape(-1,6)`).
+- Same scaler is applied to val/test.
 - Saved deployment stats:
   - `mean.npy`: `[ 2.31284325e-03, -8.78569129e-04, -9.18387133e-04, -7.16640085e-04, -1.48521774e-05, -1.16569765e-04 ]`
   - `std.npy`: `[0.40777881, 0.38327034, 0.25755577, 0.19436369, 0.12311977, 0.10720748]`
-- Raw board test arrays are also saved (`gesture_X_test.npy`, `gesture_y_test.npy`) so hardware can consume non-normalized input when normalization is fused into conv1.
+- Data is transposed to Conv1d format:
+  - `[N,60,6] -> [N,6,60]`
+- Hardware-aligned artifacts are emitted:
+  - raw board test arrays: `gesture_X_test.npy`, `gesture_y_test.npy`
+  - normalized training path for software evaluation
 
 Model/training configuration:
 - Input to network: `[N, 6, 60]`.
@@ -503,43 +519,53 @@ Gesture software evaluation:
 
 ### B) Voice notebook: software implementation details
 
-Data discovery and class mapping:
-- The notebook automatically picks latest dated folder under `../data/audio`.
-- For the captured run, it used `../data/audio/25022026`.
-- Dataset scan found `5714` `.wav` files with class map:
-  - `marvin -> 0`
-  - `sheila -> 1`
-  - `visual -> 2`
-- Base class counts:
-  - marvin: `2100`
-  - sheila: `2022`
-  - visual: `1592`
+Data discovery and base feature construction:
+- Folder is chosen by `get_latest_audio_folder(...)`; captured run used `../data/audio/25022026`.
+- `scan_audio_dataset(...)` builds a manifest (`voice_manifest.csv`) from class folders and `.wav` files.
+- Found `5714` files with class map:
+  - `marvin -> 0`, `sheila -> 1`, `visual -> 2`
+- `build_feature_set_from_manifest(..., augment_factor=1)` builds base feature tensor:
+  - `X_base shape = (5714, 40, 50)`
+  - class counts: `2100 / 2022 / 1592`
 
-Feature extraction and augmentation:
-- Audio preprocessing:
-  - mono conversion
-  - resample to `16 kHz`
-- MFCC parameters:
+Waveform-to-feature pipeline (actual code path):
+- Load waveform (`torchaudio.load` / `soundfile` path), convert to mono if needed.
+- Resample to `16 kHz`.
+- MFCC extraction:
   - `n_mfcc=40`, `n_fft=512`, `win_length=400`, `hop_length=160`, `n_mels=40`, `center=True`, `power=2.0`
-- MFCC time axis fixed to `50` frames by crop/pad.
-- Per-sample CMVN over time is applied before dataset-level normalization.
-- Two augmentation implementations exist:
-  - waveform-level (gain, shift, speed perturbation via resample, Gaussian noise)
-  - feature-level (noise, time roll, time mask, frequency mask)
+- Fix time length to `50` with `fix_mfcc_time(...)` (crop/pad).
+- Apply per-sample CMVN across time (per MFCC bin).
 
-Split/caching/normalization behavior:
-- Split policy is leakage-safe:
-  - split at original sample index level first
-  - then split validation from train
-  - both stratified (`random_state=42`)
-- In this run, `REUSE_SPLIT_IF_AVAILABLE=True` took fast path:
-  - reused saved `voice_X_train.npy`, `voice_X_test_norm.npy`, `voice_y_train.npy`, `voice_y_test.npy`, mean/std.
-  - rebuilt validation set from `X_base[val_idx]` normalized with saved train mean/std.
-- Effective tensors used in training/eval:
-  - `X_train=(12339, 40, 50)`
-  - `X_val=(458, 40, 50)`
-  - `X_test=(1143, 40, 50)`
-- Raw board test tensor saved as `voice_X_test.npy` for fused-normalization deployment path.
+Voice augmentation logic (implemented in two stages):
+- Waveform-level augmenter `augment_waveform(...)`:
+  - random gain
+  - random time shift (`torch.roll`)
+  - speed perturbation via resample-to-temp-rate then back
+  - additive Gaussian noise
+  - clamp to `[-1,1]`
+- Feature-level augmenter `augment_feature_np(...)`:
+  - additive noise
+  - time roll
+  - time masking
+  - frequency masking
+- Training builder `build_train_from_base_with_feature_aug(...)` applies feature-level augmentation only to training seed set.
+
+Split strategy and why it differs from gesture:
+- Voice split is done at original sample index (`manifest_df`) before train augmentation:
+  - `train_idx, test_idx = train_test_split(idx, ...)`
+  - `train_idx_inner, val_idx = train_test_split(train_idx, ...)`
+  - both stratified and fixed seed (`RANDOM_SEED=42`)
+- This explicitly prevents augmented siblings of the same original clip from leaking into val/test.
+- In other words: split first on original clips, then augment only train.
+
+Caching behavior in captured run:
+- `REUSE_SPLIT_IF_AVAILABLE=True` triggered fast path:
+  - reused saved `voice_X_train.npy`, `voice_X_test_norm.npy`, `voice_y_train.npy`, `voice_y_test.npy`, mean/std
+  - rebuilt val quickly from `X_base[val_idx]` with saved train normalization
+- Effective tensors used:
+  - `X_train=(12339,40,50)`, `X_val=(458,40,50)`, `X_test=(1143,40,50)`
+- Raw board input is stored separately:
+  - `voice_X_test.npy` (unnormalized), used with fused-normalization weights in deployment path
 
 Model/training configuration:
 - Input to network: `[N, 40, 50]`.
@@ -573,7 +599,15 @@ Voice software evaluation:
 ### C) Software evaluation summary
 
 Key software-side conclusions from notebook evidence:
-- Split logic is explicitly leakage-aware in both notebooks (`measurement_id` split for gesture, source-sample split for voice).
+- Both notebooks are leakage-aware at their chosen split unit:
+  - gesture: `measurement_id` windows from the active gesture CSV snapshot
+  - voice: original manifest sample indices before train augmentation
+- The split difference is intentional and comes from data organization:
+  - gesture run consumed a prebuilt augmented window table
+  - voice run built base features then augmented train only
+- Augmentation difference:
+  - gesture notebook supports signal-level augmentation before fixed-window CSV generation
+  - voice notebook combines waveform-level and feature-level augmentation, with train-only feature augmentation in active training flow
 - Quantization robustness is strong:
   - Gesture float vs Q8.8-sim gap is negligible (`93.27%` vs `93.41%`).
   - Voice float vs fixed-point proxies remains tightly aligned (`85.74%` to `86.00%` range across three simulations).
