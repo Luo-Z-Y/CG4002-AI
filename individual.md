@@ -607,7 +607,7 @@ Key software-side conclusions from notebook evidence:
 This directly answers the requirement to include inference and communication overhead.
 
 ### Benchmark/evidence command set (Ultra96)
-Single command to run assessment bundle (gesture + voice + both + power-profiled run):
+Single command to run full assessment bundle (baseline + extended control/power runs):
 
 ```bash
 cd ~/CG4002-AI/ultra96
@@ -617,9 +617,13 @@ python3 run_assessment_suite.py \
   --xsa-path dual_cnn.xsa \
   --save-dir ../report/evidence_dual \
   --voice-order tc \
+  --cpu-freq-khz 1200000 \
+  --pl-clock-sweep 75,100,125 \
   --cpu-governor performance \
   --pl-clock-mhz 100 \
   --power-w 4.2 \
+  --power-sysfs-path /sys/class/hwmon/hwmon0/power1_input \
+  --power-sysfs-scale 1e-6 \
   --tag-prefix assess
 ```
 
@@ -627,6 +631,54 @@ Outputs:
 - Per-run folder with `summary.json`
 - Aggregated bundle:
   - `../report/evidence_dual/assessment_bundle_*.json`
+
+Default run set now includes:
+- `assess_gesture`
+- `assess_voice`
+- `assess_both`
+- `assess_cpu_perf`
+- `assess_cpu_freq` (userspace + `--cpu-freq-khz`)
+- `assess_pl75`, `assess_pl100`, `assess_pl125` (from `--pl-clock-sweep`)
+- `assess_power_manual`
+- `assess_power_sysfs`
+
+### Assessment suite observed results (run on March 2, 2026)
+Bundle artifact generated:
+- `../report/evidence_dual/assessment_bundle_20260302_093349.json`
+
+Key per-tag outcomes from your run logs:
+
+| Tag | Gesture Acc (%) | Gesture Total (ms) | Voice Acc (%) | Voice Total (ms) | Notes |
+|---|---:|---:|---:|---:|---|
+| `assess_gesture` | 92.50 | 1.931 | - | - | Gesture-only baseline |
+| `assess_voice` | - | - | 88.33 | 1.981 | Voice-only baseline |
+| `assess_both` | 92.50 | 1.946 | 88.33 | 1.987 | Dual-model baseline |
+| `assess_cpu_perf` | 92.50 | 1.940 | 88.33 | 1.979 | governor set attempted (`performance`) |
+| `assess_cpu_freq` | 92.50 | 1.935 | 88.33 | 1.987 | `userspace` + `1200000 kHz` |
+| `assess_pl75` | 92.50 | 1.931 | 88.33 | 1.982 | PL clock = 75 MHz |
+| `assess_pl100` | 92.50 | 1.929 | 88.33 | 1.983 | PL clock = 100 MHz |
+| `assess_pl125` | 92.50 | 1.925 | 88.33 | 1.973 | PL clock = 125 MHz |
+| `assess_power_manual` | 92.50 | 1.945 | 88.33 | 1.998 | manual power = 4.2 W |
+| `assess_power_sysfs` | 92.50 | 1.949 | 88.33 | 2.009 | sysfs power read enabled |
+
+Detailed interpretation:
+- Accuracy stability:
+  - Gesture remains `92.50%` across all runs.
+  - Voice remains `88.33%` across all runs.
+  - Interpretation: runtime-control changes do not alter model correctness for this test set.
+- Latency trend:
+  - Gesture total latency range across suite runs is narrow (`1.925` to `1.949 ms`).
+  - Voice total latency range is also narrow (`1.973` to `2.009 ms`).
+  - Interpretation: control/clock sweeps produce only small timing shifts in current setup.
+- PL clock sweep:
+  - Best observed totals were at `125 MHz` (`gesture 1.925 ms`, `voice 1.973 ms`), but gains versus 75/100 MHz are modest.
+  - Interpretation: end-to-end runtime is not strongly PL-compute-limited.
+- Communication dominance:
+  - In all runs, `latency_comm_mean_ms` stays very close to `latency_inference_mean_ms`.
+  - Interpretation: DMA communication dominates the inference path; control overhead remains small.
+- Power-annotated runs:
+  - `assess_power_manual` and `assess_power_sysfs` complete successfully and produce power-linked reporting.
+  - `assess_power_sysfs` is slightly slower, consistent with extra sensor read path/overhead in runtime bookkeeping.
 
 ### Hardware resource usage
 Latest HLS C-synthesis estimates:
@@ -744,6 +796,16 @@ python3 dual_cnn_test.py \
 
 Practical note:
 - Frequency/governor writes may require root privileges; if unavailable, script continues and records warnings in `runtime_controls.warnings` inside `summary.json`.
+
+### Observed runtime-control behavior in your suite run
+- Runs with `--cpu-governor performance` emitted:
+  - `[WARN] Unable to set CPU governor (need root or unsupported cpufreq).`
+- Interpretation:
+  - either cpufreq governor interface is unavailable on current board image, or selected governor is unsupported by the active driver.
+  - This warning is expectedly non-fatal: test still runs and records metrics.
+- Verification method used by script:
+  - `runtime_controls.before`, `runtime_controls.applied`, and `runtime_controls.after` in each `summary.json`.
+  - This provides explicit evidence of requested versus actually-applied settings for assessment reporting.
 
 The script records before/after settings and warnings under `runtime_controls` in `summary.json`.
 
