@@ -344,6 +344,46 @@ Notes:
 - Buffer coherency:
   - input `flush()`, output `invalidate()`
 
+### Live Ultra96 run result (current reference run)
+Run context reported by script:
+- `Runtime controls`: all `null` except `power_sysfs_scale=1.0`
+- Interpretation: run used default board settings (no explicit CPU governor/frequency or PL clock override, and no power source configured)
+- Overlay load success:
+  - `dual_cnn.xsa` loaded
+  - detected IP blocks: `axi_dma_0`, `axi_dma_1`, `gesture_cnn_0`, `voice_cnn_0`, `zynq_ultra_ps_e_0`
+  - interpretation: overlay naming matches CLI defaults, so no manual `--*-core` or `--*-dma` override was needed
+
+Gesture live result (`120` samples):
+- Accuracy: `92.50%`
+- Timing mean (ms): `total=1.940`, `inference=1.484`, `comm=1.468`, `prep=0.268`
+- Confusion matrix observations:
+  - perfect for `WALKING` and `WALKING_DOWNSTAIRS` in this sample set
+  - main errors are between static activities:
+    - `SITTING -> STANDING` (`4` cases)
+    - `LAYING -> STANDING` (`3` cases)
+    - `LAYING -> SITTING` (`1` case)
+    - `STANDING -> LAYING` (`1` case)
+- Timing interpretation:
+  - communication dominates inference path (`comm` very close to `inference`)
+  - control overhead is very small (`inference - comm`)
+  - end-to-end optimization opportunity is mainly DMA/transfer overhead reduction
+
+Voice live result (`300` samples):
+- Accuracy: `88.33%`
+- Timing mean (ms): `total=1.979`, `inference=1.461`, `comm=1.445`, `prep=0.334`
+- Confusion matrix observations:
+  - `marvin`: `98` correct, `4` as `sheila`, `6` as `visual`
+  - `sheila`: `99` correct, small leakage to other classes
+  - `visual`: hardest class in this run (`68` correct, `20` confused as `marvin/sheila`)
+- Timing interpretation:
+  - same pattern as gesture: DMA communication dominates
+  - voice prep is slightly higher than gesture (larger feature tensor shape)
+
+Overall interpretation for Part 3:
+- Integration is functionally successful (overlay load, IP resolution, DMA transfers, valid class outputs).
+- Both models achieve strong on-board accuracy in this reference run.
+- The dominant runtime cost is communication overhead rather than core-control overhead, which aligns with the measured latency breakdown.
+
 ---
 
 ## 4) Ultra96 Simulation Setup (Video)
