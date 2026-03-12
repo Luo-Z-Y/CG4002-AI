@@ -3,3 +3,6 @@ data/audio/
 data/gesture/
 
 .DS_Store
+
+#ignore pem file
+*.pem

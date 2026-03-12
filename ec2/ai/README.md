@@ -1,6 +1,6 @@
 # AI Comms Module
 
-AI-side scaffold for the shared game server.
+AI-side scaffold for the shared EC2 server.
 
 Scope:
 - receive `imu` messages on EC2
@@ -18,6 +18,7 @@ This package is intentionally AI-only. It does not implement the central hub or 
 - `service.py`: optional wrapper for sending requests and consuming results
 - `audio.py`: `.m4a` decode and MFCC extraction helpers
 - `transport.py`: JSON-over-WebSocket helpers
+- `../server.py`: runnable EC2 WebSocket server for Ultra96 testing
 
 ## EC2 server info
 
@@ -47,9 +48,109 @@ For AI specifically:
 
 The MQTT examples from the comms team are therefore infrastructure notes for the shared server, not the packet contract for the AI-Ultra96 link.
 
+## Connection model
+
+The AI link uses one dedicated WebSocket server port on EC2, with a prefixed path.
+
+- EC2 runs `server.py` and listens on one port such as `8765`
+- EC2 exposes the AI bridge on a path such as `/ai/ws`
+- Ultra96 runs `ultra96/ec2_bridge.py` and connects to that exact EC2 port and path
+- the socket carries only AI bridge packets:
+  - EC2 -> Ultra96: `imu`, `voice_mfcc`
+  - Ultra96 -> EC2: `action`, `pokemon`
+
+This is separate from the MQTT broker on port `8883`.
+
+## Runnable EC2 server
+
+The repo now includes a concrete EC2 entrypoint at `ec2/server.py`.
+
+Install dependencies on EC2:
+
+```bash
+python3 -m pip install websockets numpy
+```
+
+If you want to test voice end-to-end from `.m4a`, also ensure `ffmpeg` is installed on EC2.
+
+Start the EC2 server:
+
+```bash
+cd ~/CG4002-AI/ec2
+python3 server.py --host 0.0.0.0 --port 8765 --path /ai/ws --send-test-imu
+```
+
+Example with both IMU and voice test packets:
+
+```bash
+cd ~/CG4002-AI/ec2
+python3 server.py \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --path /ai/ws \
+  --send-test-imu \
+  --m4a-path sample.m4a
+```
+
+Notes:
+- `--send-test-imu` sends one built-in IMU packet right after Ultra96 connects
+- `--imu-json path/to/file.json` can replace the built-in IMU packet with your own JSON array of samples
+- `--m4a-path sample.m4a` makes EC2 decode audio and send one `voice_mfcc` packet after Ultra96 connects
+- the current Ultra96 runtime expects exactly `60` IMU samples for a gesture inference request
+
+## Testing sequence
+
+Use this order. Do not start with Ultra96 first unless the EC2 server is already listening.
+
+1. SSH into EC2 and start the AI WebSocket server.
+
+```bash
+ssh -i /path/to/ec2-key.pem ec2-user@13.238.81.254
+cd ~/CG4002-AI/ec2
+python3 -m pip install websockets numpy
+python3 server.py --host 0.0.0.0 --port 8765 --path /ai/ws --send-test-imu
+```
+
+2. Make sure the EC2 security group allows inbound TCP on the chosen port, for example `8765`.
+
+3. SSH into Ultra96 and start the Ultra96 bridge client.
+
+```bash
+cd ~/CG4002-AI/ultra96
+python3 -m pip install websockets
+python3 ec2_bridge.py --ws-url ws://13.238.81.254:8765/ai/ws --xsa-path dual_cnn.xsa
+```
+
+4. Watch the EC2 terminal.
+
+Expected behavior:
+- EC2 prints that Ultra96 connected
+- if `--send-test-imu` was used, EC2 sends one `imu` packet
+- Ultra96 runs the gesture accelerator and replies with one `action` packet
+- EC2 prints the returned action label and confidence
+
+5. To test voice as well, restart the EC2 server with `--m4a-path sample.m4a`, then repeat the Ultra96 connection.
+
+Expected behavior:
+- EC2 converts `.m4a` to MFCC `[40, 50]`
+- EC2 sends one `voice_mfcc` packet
+- Ultra96 runs the voice accelerator and replies with one `pokemon` packet
+- EC2 prints the returned label and confidence
+
+## End-to-end summary
+
+```text
+1. EC2 server listens on ws://0.0.0.0:8765/ai/ws
+2. Ultra96 connects to ws://13.238.81.254:8765/ai/ws
+3. EC2 sends imu and/or voice_mfcc
+4. Ultra96 runs hardware inference
+5. Ultra96 sends action and/or pokemon back to EC2
+6. EC2 prints the result in its terminal
+```
+
 ## Shared comms note
 
-The communication team provided these infrastructure notes for the shared EC2 server:
+The communication teammate provided these infrastructure notes for the shared EC2 server:
 
 - the EC2 public IP is locked to `13.238.81.254`
 - the server is intended to be left running for team testing
@@ -130,7 +231,7 @@ Use one JSON packet per event. Do not combine input and output into the same mes
 Notes:
 - `shape` is fixed at `[40, 50]`
 - `features` must contain the full `40 x 50` MFCC matrix
-- the matrix above is truncated for readability; the real packet must contain all rows
+- the matrix above is truncated for readability, the real packet must contain all rows
 - `.m4a` should be decoded and converted to MFCC on EC2 before sending to Ultra96
 
 ### Ultra96 -> EC2
