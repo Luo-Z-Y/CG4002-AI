@@ -13,10 +13,20 @@ Supported packet directions:
 - Ultra96 -> EC2: `action`, `pokemon`
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass as _dataclass
 from enum import Enum
 from numbers import Integral, Real
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence, Union
+
+
+def dataclass(*args, **kwargs):
+    """Backwards-compatible wrapper for Python < 3.10 where `slots` is unsupported."""
+
+    try:
+        return _dataclass(*args, **kwargs)
+    except TypeError:
+        kwargs.pop("slots", None)
+        return _dataclass(*args, **kwargs)
 
 
 class MessageKind(str, Enum):
@@ -99,7 +109,7 @@ class ImuData:
     """Payload for `type="imu"` packets sent from EC2 to Ultra96."""
 
     samples: list[ImuSample]
-    count: int | None = None
+    count: Optional[int] = None
 
     def __post_init__(self) -> None:
         # Keep the explicit `count` field consistent with the actual number of samples.
@@ -236,14 +246,14 @@ class Packet:
             data = payload_type.from_dict(raw_data).to_dict()
         return cls(kind=kind, data=data)
 
-    def decode_data(self) -> ImuData | VoiceMfccData | ClassificationData:
+    def decode_data(self) -> Union["ImuData", "VoiceMfccData", "ClassificationData"]:
         payload_type = _PAYLOAD_TYPES[self.kind]
         if self.kind in (MessageKind.ACTION, MessageKind.POKEMON):
             return payload_type.from_dict(self.data, self.kind)
         return payload_type.from_dict(self.data)
 
 
-def build_imu_data(samples: Sequence[ImuSample | Mapping[str, Any]]) -> ImuData:
+def build_imu_data(samples: Sequence[Union[ImuSample, Mapping[str, Any]]]) -> ImuData:
     """Normalize raw IMU dicts into validated `ImuData`."""
 
     normalized_samples = [

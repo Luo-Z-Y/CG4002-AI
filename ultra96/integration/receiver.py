@@ -3,7 +3,7 @@ from __future__ import annotations
 """EC2 -> Ultra96 packet receiver."""
 
 import inspect
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, Optional, Union
 
 try:
     from .messages import ImuData, MessageKind, Packet, VoiceMfccData
@@ -12,11 +12,11 @@ except ImportError:
     from messages import ImuData, MessageKind, Packet, VoiceMfccData
     from transport import receive_json
 
-ImuHandler = Callable[[Packet, ImuData], Awaitable[None] | None]
-VoiceHandler = Callable[[Packet, VoiceMfccData], Awaitable[None] | None]
+ImuHandler = Callable[[Packet, ImuData], Optional[Awaitable[None]]]
+VoiceHandler = Callable[[Packet, VoiceMfccData], Optional[Awaitable[None]]]
 
 
-async def _maybe_await(result: Awaitable[None] | None) -> None:
+async def _maybe_await(result: Optional[Awaitable[None]]) -> None:
     if inspect.isawaitable(result):
         await result
 
@@ -32,7 +32,7 @@ class Ultra96Receiver:
     def on_voice_mfcc(self, handler: VoiceHandler) -> None:
         self._voice_handlers.append(handler)
 
-    async def dispatch(self, message: Mapping[str, Any] | Packet) -> None:
+    async def dispatch(self, message: Union[Mapping[str, Any], Packet]) -> None:
         packet = message if isinstance(message, Packet) else Packet.from_dict(message)
         if packet.kind == MessageKind.IMU:
             data = ImuData.from_dict(packet.data)

@@ -10,15 +10,15 @@ Typical usage:
 
 import inspect
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from .audio import m4a_to_mfcc_matrix
 from .messages import ClassificationData, ImuSample
 from .receiver import AIReceiver
 from .sender import AISender
 
-ActionResultHandler = Callable[[ClassificationData], Awaitable[None] | None]
-PokemonResultHandler = Callable[[ClassificationData], Awaitable[None] | None]
+ActionResultHandler = Callable[[ClassificationData], Optional[Awaitable[None]]]
+PokemonResultHandler = Callable[[ClassificationData], Optional[Awaitable[None]]]
 
 
 async def _maybe_await(result: Any) -> Any:
@@ -38,8 +38,8 @@ class AIService:
         self,
         sender: AISender,
         receiver: AIReceiver,
-        action_handler: ActionResultHandler | None = None,
-        pokemon_handler: PokemonResultHandler | None = None,
+        action_handler: Optional[ActionResultHandler] = None,
+        pokemon_handler: Optional[PokemonResultHandler] = None,
     ) -> None:
         self.sender = sender
         self.receiver = receiver
@@ -51,7 +51,7 @@ class AIService:
         if self.pokemon_handler is not None:
             self.receiver.on_pokemon(self._handle_pokemon)
 
-    async def send_imu_samples(self, samples: list[ImuSample | dict[str, float]]) -> None:
+    async def send_imu_samples(self, samples: List[Union[ImuSample, Dict[str, float]]]) -> None:
         """Forward IMU samples to Ultra96."""
 
         await self.sender.send_imu(samples)
@@ -61,7 +61,7 @@ class AIService:
 
         await self.sender.send_voice_mfcc(features)
 
-    async def send_m4a_file(self, m4a_path: str | Path, ffmpeg_path: str = "ffmpeg") -> list[list[float]]:
+    async def send_m4a_file(self, m4a_path: Union[str, Path], ffmpeg_path: str = "ffmpeg") -> List[List[float]]:
         """Decode `.m4a`, compute MFCC, send to Ultra96, and return the matrix used."""
 
         mfcc = m4a_to_mfcc_matrix(m4a_path, ffmpeg_path=ffmpeg_path)

@@ -15,6 +15,7 @@ heavy audio Python packages.
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 
@@ -162,7 +163,7 @@ class VoicePreprocessor:
 
 
 def decode_m4a_to_waveform(
-    m4a_path: str | Path,
+    m4a_path: Union[str, Path],
     sample_rate: int = 16000,
     ffmpeg_path: str = "ffmpeg",
 ) -> np.ndarray:
@@ -201,10 +202,10 @@ def decode_m4a_to_waveform(
 
 
 def m4a_to_mfcc_matrix(
-    m4a_path: str | Path,
+    m4a_path: Union[str, Path],
     sample_rate: int = 16000,
     ffmpeg_path: str = "ffmpeg",
-    preprocessor: VoicePreprocessor | None = None,
+    preprocessor: Optional[VoicePreprocessor] = None,
 ) -> np.ndarray:
     """One-shot helper for the full EC2 voice preprocessing path."""
 

@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import json
 from pathlib import Path
+from typing import Dict, List, Optional
 
 try:
     import websockets
@@ -16,7 +17,7 @@ except ImportError as exc:
 from ai import AIReceiver, AISender
 
 
-def _default_imu_window() -> list[dict[str, float]]:
+def _default_imu_window() -> List[Dict[str, float]]:
     """Return a simple 60-sample IMU window matching the current Ultra96 expectation."""
 
     return [
@@ -32,7 +33,7 @@ def _default_imu_window() -> list[dict[str, float]]:
     ]
 
 
-def _load_imu_samples(path: str | None) -> list[dict[str, float]]:
+def _load_imu_samples(path: Optional[str]) -> List[Dict[str, float]]:
     if path is None:
         return _default_imu_window()
 
@@ -46,8 +47,8 @@ class EC2BridgeServer:
     def __init__(
         self,
         send_test_imu: bool,
-        imu_json: str | None,
-        m4a_path: str | None,
+        imu_json: Optional[str],
+        m4a_path: Optional[str],
         ffmpeg_path: str,
         ws_path: str,
     ) -> None:
@@ -66,7 +67,7 @@ class EC2BridgeServer:
             normalized = normalized[:-1]
         return normalized
 
-    def _request_path(self, websocket, path: str | None) -> str:
+    def _request_path(self, websocket, path: Optional[str]) -> str:
         if path is not None:
             raw = path
         else:
@@ -76,7 +77,7 @@ class EC2BridgeServer:
                 raw = getattr(websocket, "path", "/")
         return self._normalize_path(str(raw).split("?", 1)[0])
 
-    async def handle_client(self, websocket, path: str | None = None) -> None:
+    async def handle_client(self, websocket, path: Optional[str] = None) -> None:
         request_path = self._request_path(websocket, path)
         if request_path != self.ws_path:
             remote = getattr(websocket, "remote_address", None)

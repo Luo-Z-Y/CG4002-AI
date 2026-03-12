@@ -7,7 +7,7 @@ The package stays library-agnostic here: any websocket object with `send()` and
 """
 
 import json
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Union
 
 
 class WebSocketLike(Protocol):
@@ -15,7 +15,7 @@ class WebSocketLike(Protocol):
 
     async def send(self, message: str) -> Any: ...
 
-    async def recv(self) -> str | bytes: ...
+    async def recv(self) -> Union[str, bytes]: ...
 
 
 async def send_json(websocket: WebSocketLike, message: Mapping[str, Any]) -> None:

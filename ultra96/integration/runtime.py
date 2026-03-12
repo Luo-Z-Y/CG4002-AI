@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Single-sample hardware inference wrapper for the EC2 bridge."""
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -28,8 +28,8 @@ class Ultra96Runtime:
         gesture_dma_name: str = hw.GESTURE_DMA_NAME,
         voice_dma_name: str = hw.VOICE_DMA_NAME,
         timeout_s: float = 2.0,
-        gesture_labels: Sequence[str] | None = None,
-        voice_labels: Sequence[str] | None = None,
+        gesture_labels: Optional[Sequence[str]] = None,
+        voice_labels: Optional[Sequence[str]] = None,
         default_confidence: float = 1.0,
     ) -> None:
         from pynq import Overlay

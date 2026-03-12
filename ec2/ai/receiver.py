@@ -8,16 +8,16 @@ This file only accepts inference results:
 """
 
 import inspect
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, Optional, Union
 
 from .messages import ClassificationData, MessageKind, Packet
 from .transport import receive_json
 
-ActionHandler = Callable[[Packet, ClassificationData], Awaitable[None] | None]
-PokemonHandler = Callable[[Packet, ClassificationData], Awaitable[None] | None]
+ActionHandler = Callable[[Packet, ClassificationData], Optional[Awaitable[None]]]
+PokemonHandler = Callable[[Packet, ClassificationData], Optional[Awaitable[None]]]
 
 
-async def _maybe_await(result: Awaitable[None] | None) -> None:
+async def _maybe_await(result: Optional[Awaitable[None]]) -> None:
     if inspect.isawaitable(result):
         await result
 
@@ -39,7 +39,7 @@ class AIReceiver:
 
         self._pokemon_handlers.append(handler)
 
-    async def dispatch(self, message: Mapping[str, Any] | Packet) -> None:
+    async def dispatch(self, message: Union[Mapping[str, Any], Packet]) -> None:
         """Validate one incoming packet and forward it to the correct handler list."""
 
         packet = message if isinstance(message, Packet) else Packet.from_dict(message)
