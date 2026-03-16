@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--python-bin", default=sys.executable, help="Python executable to use.")
     p.add_argument("--runner", default="dual_cnn_test.py", help="Path to dual_cnn_test.py.")
     p.add_argument("--xsa-path", default="dual_cnn.xsa")
-    p.add_argument("--save-dir", default="../report/evidence_dual")
+    p.add_argument("--save-dir", default="report/evidence_dual")
     p.add_argument("--tag-prefix", default="assess", help="Prefix used for run tags.")
     p.add_argument("--gesture-max-samples", type=int, default=120)
     p.add_argument("--voice-max-samples", type=int, default=300)
