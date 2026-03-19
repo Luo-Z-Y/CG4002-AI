@@ -13,15 +13,12 @@ VOICE_CORE_NAME = "voice_cnn_0"
 GESTURE_DMA_NAME = "axi_dma_1"
 VOICE_DMA_NAME = "axi_dma_0"
 
-GESTURE_LABELS = [
-    "WALKING",
-    "WALKING_UPSTAIRS",
-    "WALKING_DOWNSTAIRS",
-    "SITTING",
-    "STANDING",
-    "LAYING",
-]
-VOICE_LABELS = ["marvin", "sheila", "visual"]
+GESTURE_LABELS = ["0", "1", "2", "3", "4", "5"]
+VOICE_LABELS = ["0", "1", "2"]
+
+# Current class meanings used by the latest datasets/model wiring:
+# Gesture: 0=Raise, 1=Shake, 2=Chop, 3=Stir, 4=Swing, 5=Punch
+# Voice: 0=bulbasaur, 1=charizard, 2=pikachu
 
 
 def q88_pack_u32(x: np.ndarray) -> np.ndarray:

@@ -9,7 +9,7 @@ import time
 XSA_PATH = "gesture_cnn_updated.xsa"
 CSV_PATH = "augmented_imudata.csv"
 
-LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
+LABELS = ["0", "1", "2", "3", "4", "5"]
 
 # If your CSV has a time/order column inside each measurement_id group,
 # set it here (examples: "timestamp", "sample_idx"). Otherwise leave None.

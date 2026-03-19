@@ -222,7 +222,7 @@ Example of a successful IMU test:
 ```text
 Ultra96 connected: (...) path=/ai/ws
 Sending IMU packet with 60 samples
-ACTION label=SITTING confidence=1.0000
+ACTION label=3 confidence=1.0000
 ```
 
 ### Voice test
@@ -367,7 +367,7 @@ Notes:
 {
   "type": "action",
   "data": {
-    "label": "stir",
+    "label": "3",
     "confidence": 0.81
   }
 }
@@ -379,7 +379,7 @@ Notes:
 {
   "type": "pokemon",
   "data": {
-    "label": "pikachu",
+    "label": "0",
     "confidence": 0.88
   }
 }
@@ -423,7 +423,7 @@ Ultra96 -> EC2
 {
   "type": "action",
   "data": {
-    "label": string,
+    "label": "0" | "1" | "2" | "3" | "4" | "5",
     "confidence": number
   }
 }
@@ -432,11 +432,15 @@ Ultra96 -> EC2
 {
   "type": "pokemon",
   "data": {
-    "label": string,
+    "label": "0" | "1" | "2",
     "confidence": number
   }
 }
 ```
+
+Current label meanings:
+- Gesture/action: `0=Raise`, `1=Shake`, `2=Chop`, `3=Stir`, `4=Swing`, `5=Punch`
+- Voice/pokemon: `0=bulbasaur`, `1=charizard`, `2=pikachu`
 
 ## Previous scaffold note
 

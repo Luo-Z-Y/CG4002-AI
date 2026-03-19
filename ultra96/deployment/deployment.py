@@ -42,6 +42,7 @@ from common import (
     hw,
 )
 from audio import VoicePreprocessor, m4a_to_mfcc_matrix
+from imu import ImuPreprocessor
 from messages import ClassificationData, ImuData, MessageKind, Packet, VoiceMfccData, build_imu_data
 from runtime import Ultra96Runtime
 
@@ -67,6 +68,10 @@ class MqttAiBridge:
             voice_labels=parse_labels(args.voice_labels),
         )
         self.voice_preprocessor = VoicePreprocessor(sample_rate=args.voice_sample_rate)
+        self.imu_preprocessor = ImuPreprocessor(
+            min_count=args.imu_min_count,
+            max_count=args.imu_max_count,
+        )
         self.queue: "queue.Queue[InboundMessage]" = queue.Queue()
         self.stop_event = threading.Event()
         self.connected_event = threading.Event()
@@ -145,6 +150,7 @@ class MqttAiBridge:
         try:
             if mqtt.topic_matches_sub(self.args.imu_topic, message.topic):
                 data = self._parse_imu_payload(message.payload)
+                data = self.imu_preprocessor.preprocess(data)
                 result = self.runtime.classify_imu(data)
                 self._publish_result(self.args.action_topic, MessageKind.ACTION, result, player_id, message.topic)
                 print(
@@ -264,6 +270,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--subscribe-qos", type=int, default=1, choices=[0, 1, 2])
     parser.add_argument("--publish-qos", type=int, default=1, choices=[0, 1, 2])
     parser.add_argument("--imu-topic", default=DEFAULT_IMU_TOPIC)
+    parser.add_argument("--imu-min-count", type=int, default=15)
+    parser.add_argument("--imu-max-count", type=int, default=60)
     parser.add_argument("--voice-topic", default=DEFAULT_VOICE_TOPIC)
     parser.add_argument("--action-topic", default=DEFAULT_ACTION_TOPIC)
     parser.add_argument("--pokemon-topic", default=DEFAULT_POKEMON_TOPIC)

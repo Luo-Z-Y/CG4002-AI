@@ -99,7 +99,7 @@ print("✅ FPGA Ready.")
 print("\n--- Starting Smoke Test (1 sample per class) ---")
 
 df = pd.read_csv(CSV_PATH)
-LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
+LABELS = ["0", "1", "2", "3", "4", "5"]
 
 found_classes = set()
 grouped = df.groupby('measurement_id')

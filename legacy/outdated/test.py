@@ -26,7 +26,7 @@ print("\n--- Starting Smoke Test (1 sample per class) ---")
 
 # Load Data
 df = pd.read_csv(CSV_PATH)
-LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
+LABELS = ["0", "1", "2", "3", "4", "5"]
 
 # We will just pick the first occurrence of each label_id (0 to 5)
 found_classes = set()

@@ -15,7 +15,7 @@ from preprocess import GesturePreprocessor
 XSA_PATH = "gesture_cnn.xsa"
 CSV_PATH = "augmented_imudata.csv"
 
-LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
+LABELS = ["0", "1", "2", "3", "4", "5"]
 C = len(LABELS)
 
 # Your CSV columns include sequence_id; always sort by it to match time order

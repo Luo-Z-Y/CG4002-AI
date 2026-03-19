@@ -32,7 +32,8 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Input: IMU window `[60, 6]` (`gyro_x/y/z`, `acc_x/y/z`)
 - AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed in AXIS `data[15:0]` (default in `ultra96/dual_cnn_test.py`)
 - Active labels (6, current public dataset): `WALKING`, `WALKING_UPSTAIRS`, `WALKING_DOWNSTAIRS`, `SITTING`, `STANDING`, `LAYING`
-- Project-target labels (future intent): `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
+- Project-target gesture meanings: `0=Raise`, `1=Shake`, `2=Chop`, `3=Stir`, `4=Swing`, `5=Punch`
+- Deployment/runtime output convention: gesture labels are emitted as numeric strings `0` to `5`
 - Training split policy: `train/test` split first, then `train/val`; validation is used for epoch monitoring/model selection, and test is held for final reporting.
 - Current dataset snapshots:
   - Legacy project gesture set (txt-logs + augmentation): `data/gesture/13022026`
@@ -51,7 +52,8 @@ This repository implements a hardware-software co-design for real-time gesture a
   - Active training/deployment labels (`marvin`, `sheila`, `visual`): `data/audio/25022026`
   - Legacy label set (`yes`, `no`, `go`): `data/audio/18022026`
 - Evaluation script: `ultra96/dual_cnn_test.py`
-- Voice labels (current 3-class implementation): `marvin`, `sheila`, `visual`
+- Voice label meanings (current 3-class implementation): `0=bulbasaur`, `1=charizard`, `2=pikachu`
+- Deployment/runtime output convention: voice labels are emitted as numeric strings `0` to `2`
 - Future plan: migrate to real Pokémon labels (for first iteration: `pikachu`, `charizard`, `babusaur`) after dataset refresh and retraining.
 
 ### Router
