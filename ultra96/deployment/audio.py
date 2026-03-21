@@ -139,12 +139,6 @@ class VoicePreprocessor:
             return feat[:, : self.target_frames]
         return np.pad(feat, ((0, 0), (0, self.target_frames - frame_count)), mode="constant")
 
-    def _cmvn(self, feat: np.ndarray) -> np.ndarray:
-        # Normalize each MFCC coefficient across time.
-        mean = feat.mean(axis=1, keepdims=True)
-        std = feat.std(axis=1, keepdims=True)
-        return (feat - mean) / (std + self.eps)
-
     def process_waveform(self, waveform: np.ndarray, sample_rate: int) -> np.ndarray:
         """Convert a mono waveform into the fixed MFCC matrix sent to Ultra96."""
 
@@ -152,14 +146,15 @@ class VoicePreprocessor:
         if sample_rate != self.sample_rate:
             raise ValueError(f"Expected sample_rate={self.sample_rate}, got {sample_rate}")
 
-        # MFCC pipeline: pre-emphasis -> STFT power -> mel -> log -> DCT -> fixed frame count -> CMVN
+        # MFCC pipeline: pre-emphasis -> STFT power -> mel -> log -> DCT -> fixed frame count.
+        # Dataset-level normalization is fused into conv1 weights during export instead of per-clip CMVN.
         waveform = self._pre_emphasize(waveform)
         power_spec = self._stft_power(waveform)
         mel_spec = np.matmul(self.mel_fb, power_spec)
         log_mel = np.log(mel_spec + self.eps)
         mfcc = np.matmul(self.dct_mat, log_mel).astype(np.float32)
         mfcc = self._pad_or_trim_time(mfcc)
-        return self._cmvn(mfcc).astype(np.float32)
+        return mfcc.astype(np.float32)
 
 
 def decode_m4a_to_waveform(
