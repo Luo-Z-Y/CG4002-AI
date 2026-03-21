@@ -66,7 +66,9 @@ def reason_code_value(reason_code: Any) -> int:
 
 def extract_player_id(topic: str) -> Optional[str]:
     parts = [part for part in topic.split("/") if part]
-    if len(parts) < 2:
+    if len(parts) < 4:
+        return None
+    if parts[2] not in {"sensor", "viz"}:
         return None
     return parts[1]
 

@@ -44,6 +44,7 @@ from common import (
 from audio import VoicePreprocessor, m4a_to_mfcc_matrix
 from imu import ImuPreprocessor
 from messages import ClassificationData, ImuData, MessageKind, Packet, VoiceMfccData, build_imu_data
+from reconstruct import VoiceChunkReconstructor
 from runtime import Ultra96Runtime
 
 
@@ -78,6 +79,10 @@ class MqttAiBridge:
         self.connect_error: Optional[str] = None
         self.spool_dir = Path(args.voice_spool_dir).resolve()
         self.spool_dir.mkdir(parents=True, exist_ok=True)
+        self.voice_reconstructor = VoiceChunkReconstructor(
+            default_suffix=args.voice_chunk_extension,
+            max_age_s=args.voice_chunk_timeout_s,
+        )
 
         self.client = mqtt.Client(client_id=args.client_id)
         if args.username:
@@ -161,6 +166,8 @@ class MqttAiBridge:
 
             if self.args.voice_topic and mqtt.topic_matches_sub(self.args.voice_topic, message.topic):
                 data = self._parse_voice_payload(message.payload)
+                if data is None:
+                    return
                 result = self.runtime.classify_voice_mfcc(data)
                 self._publish_result(self.args.pokemon_topic, MessageKind.POKEMON, result, player_id, message.topic)
                 print(
@@ -193,7 +200,7 @@ class MqttAiBridge:
 
         raise ValueError("Unsupported IMU payload format")
 
-    def _parse_voice_payload(self, payload: bytes) -> VoiceMfccData:
+    def _parse_voice_payload(self, payload: bytes) -> Optional[VoiceMfccData]:
         parsed = try_parse_json(payload)
         if isinstance(parsed, dict):
             packet_type = parsed.get("type")
@@ -204,6 +211,14 @@ class MqttAiBridge:
             candidate = packet_data if isinstance(packet_data, dict) else parsed
             if "features" in candidate:
                 return VoiceMfccData.from_dict(candidate)
+
+            if self.voice_reconstructor.is_chunk_payload(candidate):
+                chunk = self.voice_reconstructor.add_chunk(candidate)
+                print(f"Chunk {chunk.received_chunks}/{chunk.total_chunks} for {chunk.message_id}")
+                if not chunk.is_complete:
+                    return None
+                print(f"Complete audio received: {chunk.message_id}")
+                return self._mfcc_from_file_bytes(chunk.audio_bytes, chunk.suffix)
 
             audio_bytes = extract_audio_bytes(candidate)
             if audio_bytes is not None:
@@ -281,6 +296,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keyfile", default=None)
     parser.add_argument("--tls-insecure", action="store_true")
     parser.add_argument("--voice-file-extension", default=".m4a")
+    parser.add_argument("--voice-chunk-extension", default=".wav")
+    parser.add_argument("--voice-chunk-timeout-s", type=float, default=30.0)
     parser.add_argument("--voice-sample-rate", type=int, default=16000)
     parser.add_argument("--voice-spool-dir", default=str(DEFAULT_SPOOL_DIR))
     parser.add_argument("--keep-voice-files", action="store_true")

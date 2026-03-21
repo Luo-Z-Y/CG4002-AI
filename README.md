@@ -36,9 +36,9 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Deployment/runtime output convention: gesture labels are emitted as numeric strings `0` to `5`
 - Training split policy: `train/test` split first, then `train/val`; validation is used for epoch monitoring/model selection, and test is held for final reporting.
 - Current dataset snapshots:
-  - Legacy project gesture set (txt-logs + augmentation): `data/gesture/13022026`
+  - Legacy project gesture set (txt-logs + augmentation): `data/gesture/20260213`
     - Legacy raw file-stem/class names used in notebook parser: `raise`, `shake3`, `vertical`, `circular`, `horizontal`, `punch`
-  - Public compatibility dataset (UCI HAR converted to repo schema): `data/gesture/27022026`
+  - Public compatibility dataset (UCI HAR converted to repo schema): `data/gesture/20260227`
     - Format compatibility: converted to `[60, 6]` windows with columns `measurement_id, sequence_id, label_id, gyro_x/y/z, acc_x/y/z`
     - Current 6-class labels used in this public set: `WALKING`, `WALKING_UPSTAIRS`, `WALKING_DOWNSTAIRS`, `SITTING`, `STANDING`, `LAYING`
     - Label semantics note: these differ from project-target gesture names above.
@@ -49,12 +49,13 @@ This repository implements a hardware-software co-design for real-time gesture a
 - Input feature shape: MFCC `[40, 50]`
 - AXIS input contract (current deployed `dual_cnn.xsa`): signed `Q8.8` packed into AXIS `data[15:0]`
 - Current dataset snapshots:
-  - Active training/deployment labels (`marvin`, `sheila`, `visual`): `data/audio/25022026`
-  - Legacy label set (`yes`, `no`, `go`): `data/audio/18022026`
+  - Active Pokemon label set (`bulbasaur`, `charizard`, `pikachu`): `data/audio/20260321`
+  - Previous SpeechCommands-derived label set (`marvin`, `sheila`, `visual`): `data/audio/20260225`
+  - Legacy label set (`yes`, `no`, `go`): `data/audio/20260218`
 - Evaluation script: `ultra96/dual_cnn_test.py`
 - Voice label meanings (current 3-class implementation): `0=bulbasaur`, `1=charizard`, `2=pikachu`
 - Deployment/runtime output convention: voice labels are emitted as numeric strings `0` to `2`
-- Future plan: migrate to real Pokémon labels (for first iteration: `pikachu`, `charizard`, `babusaur`) after dataset refresh and retraining.
+- Dataset note: the latest Pokemon folder now contains `55` clips per class after slicing two additional 5-utterance raw recordings for each label.
 
 ### Router
 - Runtime arbitration scaffold: `test/router.py`
@@ -192,8 +193,8 @@ CG4002-AI/
 python3 ultra96/dual_cnn_test.py \
   --xsa-path hardware/vivado/dual_cnn.xsa \
   --mode gesture \
-  --gesture-features data/gesture/27022026/gesture_X_test.npy \
-  --gesture-labels data/gesture/27022026/gesture_y_test.npy \
+  --gesture-features data/gesture/20260227/gesture_X_test.npy \
+  --gesture-labels data/gesture/20260227/gesture_y_test.npy \
   --gesture-num-classes 6 \
   --gesture-pack q88 \
   --save-dir report/evidence_dual \
@@ -206,8 +207,8 @@ python3 ultra96/dual_cnn_test.py \
 python3 ultra96/dual_cnn_test.py \
   --xsa-path hardware/vivado/dual_cnn.xsa \
   --mode voice \
-  --voice-features data/audio/25022026/voice_X_test.npy \
-  --voice-labels data/audio/25022026/voice_y_test.npy \
+  --voice-features data/audio/20260321/voice_X_test.npy \
+  --voice-labels data/audio/20260321/voice_y_test.npy \
   --voice-pack q88 \
   --save-dir report/evidence_dual \
   --tag baseline

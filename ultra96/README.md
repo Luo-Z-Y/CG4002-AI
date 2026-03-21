@@ -75,6 +75,7 @@ Contents:
 - `mqtt_ai_bridge.py`
 - `common.py`
 - `audio.py`
+- `reconstruct.py`
 - `imu.py`
 - `hardware.py`
 - `messages.py`
@@ -119,12 +120,12 @@ python3 deployment.py \
   --keepalive 60
 ```
 
-4. Enable voice subscription with the intended deployment topic:
+4. Enable voice subscription for chunked raw audio:
 
 ```bash
 cd deployment
 python3 deployment.py \
-  --voice-topic 'phone/+/viz/mic'
+  --voice-topic 'viz/voice/raw'
 ```
 
 5. Override all MQTT topics explicitly:
@@ -133,7 +134,7 @@ python3 deployment.py \
 cd deployment
 python3 deployment.py \
   --imu-topic 'esp32/+/sensor/imu' \
-  --voice-topic 'phone/+/viz/mic' \
+  --voice-topic 'viz/voice/raw' \
   --action-topic 'ultra96/ai/action' \
   --pokemon-topic 'ultra96/ai/pokemon' \
   --error-topic 'ultra96/ai/error'
@@ -178,12 +179,14 @@ python3 deployment.py \
   --voice-labels '0,1,2'
 ```
 
-10. Voice preprocessing with a custom sample rate, spool directory, and `ffmpeg` path:
+10. Voice preprocessing with custom chunk settings, sample rate, spool directory, and `ffmpeg` path:
 
 ```bash
 cd deployment
 python3 deployment.py \
-  --voice-topic 'phone/+/viz/mic' \
+  --voice-topic 'viz/voice/raw' \
+  --voice-chunk-extension .wav \
+  --voice-chunk-timeout-s 30 \
   --voice-sample-rate 16000 \
   --voice-spool-dir ./spool \
   --ffmpeg-path /usr/bin/ffmpeg
@@ -194,7 +197,7 @@ python3 deployment.py \
 ```bash
 cd deployment
 python3 deployment.py \
-  --voice-topic 'phone/+/viz/mic' \
+  --voice-topic 'viz/voice/raw' \
   --keep-voice-files
 ```
 
@@ -237,7 +240,7 @@ python3 deployment.py \
   --password cg4002 \
   --cafile /home/xilinx/ca.crt \
   --imu-topic 'esp32/+/sensor/imu' \
-  --voice-topic 'phone/+/viz/mic' \
+  --voice-topic 'viz/voice/raw' \
   --action-topic 'ultra96/ai/action' \
   --pokemon-topic 'ultra96/ai/pokemon' \
   --error-topic 'ultra96/ai/error' \
@@ -258,6 +261,79 @@ Current default deployment settings:
 - subscribe IMU: `esp32/+/sensor/imu`
 - IMU count range: `15` to `60`, resampled to the model's fixed `60` steps
 - gesture labels sent to EC2: `0`, `1`, `2`, `3`, `4`, `5`
+
+MQTT topic directions:
+
+- Ultra96 subscribes to IMU requests on `esp32/+/sensor/imu`
+- Ultra96 subscribes to chunked voice audio on `viz/voice/raw`
+- Ultra96 publishes gesture results on `ultra96/ai/action`
+- Ultra96 publishes voice results on `ultra96/ai/pokemon`
+- Ultra96 publishes runtime errors on `ultra96/ai/error`
+
+Example subscribe commands:
+
+```bash
+mosquitto_sub \
+  -h 13.238.81.254 \
+  -p 8883 \
+  --cafile /home/xilinx/ca.crt \
+  -u mqttuser \
+  -P cg4002 \
+  -t 'ultra96/ai/action' \
+  -t 'ultra96/ai/pokemon' \
+  -t 'ultra96/ai/error'
+```
+
+```bash
+mosquitto_sub \
+  -h 13.238.81.254 \
+  -p 8883 \
+  --cafile /home/xilinx/ca.crt \
+  -u mqttuser \
+  -P cg4002 \
+  -t 'viz/voice/raw'
+```
+
+Example publish commands:
+
+Publish one IMU request:
+
+```bash
+mosquitto_pub \
+  -h 13.238.81.254 \
+  -p 8883 \
+  --cafile /home/xilinx/ca.crt \
+  -u mqttuser \
+  -P cg4002 \
+  -t 'esp32/1/sensor/imu' \
+  -m '{"type":"imu","data":{"samples":[{"y":0.0,"p":0.0,"r":0.0,"ax":0.0,"ay":0.0,"az":9.81},{"y":1.0,"p":0.1,"r":-0.1,"ax":0.01,"ay":-0.02,"az":9.81}],"count":2}}'
+```
+
+Publish one chunked voice packet:
+
+```bash
+mosquitto_pub \
+  -h 13.238.81.254 \
+  -p 8883 \
+  --cafile /home/xilinx/ca.crt \
+  -u mqttuser \
+  -P cg4002 \
+  -t 'viz/voice/raw' \
+  -m '{"id":"voice-001","index":0,"total":2,"data":"52494646","filename":"voice-001.wav"}'
+```
+
+Publish the final chunk for the same voice message:
+
+```bash
+mosquitto_pub \
+  -h 13.238.81.254 \
+  -p 8883 \
+  --cafile /home/xilinx/ca.crt \
+  -u mqttuser \
+  -P cg4002 \
+  -t 'viz/voice/raw' \
+  -m '{"id":"voice-001","index":1,"total":2,"data":"57415645","filename":"voice-001.wav"}'
+```
 - gesture label meanings: `0=Raise`, `1=Shake`, `2=Chop`, `3=Stir`, `4=Swing`, `5=Punch`
 - voice labels sent to EC2: `0`, `1`, `2`
 - voice label meanings: `0=bulbasaur`, `1=charizard`, `2=pikachu`
