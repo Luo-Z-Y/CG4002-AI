@@ -33,6 +33,13 @@ class VoicePreprocessor:
         n_mfcc: int = 40,
         target_frames: int = 50,
         pre_emphasis: float = 0.97,
+        trim_threshold_db: float = -28.0,
+        min_floor_dbfs: float = -45.0,
+        trim_pad_ms: float = 80.0,
+        trim_frame_ms: float = 20.0,
+        trim_hop_ms: float = 10.0,
+        target_rms_dbfs: float = -18.0,
+        peak_limit_dbfs: float = -1.0,
         eps: float = 1e-8,
     ) -> None:
         self.sample_rate = sample_rate
@@ -43,6 +50,13 @@ class VoicePreprocessor:
         self.n_mfcc = n_mfcc
         self.target_frames = target_frames
         self.pre_emphasis = pre_emphasis
+        self.trim_threshold_db = trim_threshold_db
+        self.min_floor_dbfs = min_floor_dbfs
+        self.trim_pad_ms = trim_pad_ms
+        self.trim_frame_ms = trim_frame_ms
+        self.trim_hop_ms = trim_hop_ms
+        self.target_rms_dbfs = target_rms_dbfs
+        self.peak_limit_dbfs = peak_limit_dbfs
         self.eps = eps
 
         self.window = np.hanning(self.win_length).astype(np.float32)
@@ -130,6 +144,55 @@ class VoicePreprocessor:
         spec = np.fft.rfft(frames, n=self.n_fft, axis=1)
         return (np.abs(spec) ** 2).astype(np.float32).T
 
+    def _compute_frame_rms(self, waveform: np.ndarray) -> tuple[np.ndarray, int, int]:
+        frame_len = max(1, int(round(self.sample_rate * self.trim_frame_ms / 1000.0)))
+        hop_len = max(1, int(round(self.sample_rate * self.trim_hop_ms / 1000.0)))
+        if waveform.size <= frame_len:
+            frame = np.pad(waveform, (0, max(0, frame_len - waveform.size)), mode="constant")
+            rms = np.sqrt(np.mean(np.square(frame), dtype=np.float64))
+            return np.asarray([rms], dtype=np.float32), frame_len, hop_len
+
+        rms_values = []
+        for start in range(0, waveform.size - frame_len + 1, hop_len):
+            frame = waveform[start : start + frame_len]
+            rms_values.append(np.sqrt(np.mean(np.square(frame), dtype=np.float64)))
+        if not rms_values:
+            rms_values.append(np.sqrt(np.mean(np.square(waveform), dtype=np.float64)))
+        return np.asarray(rms_values, dtype=np.float32), frame_len, hop_len
+
+    def _trim_silence(self, waveform: np.ndarray) -> np.ndarray:
+        frame_rms, frame_len, hop_len = self._compute_frame_rms(waveform)
+        peak_rms = float(frame_rms.max(initial=0.0))
+        if peak_rms <= self.eps:
+            return waveform
+
+        relative_threshold = peak_rms * (10.0 ** (self.trim_threshold_db / 20.0))
+        absolute_threshold = 10.0 ** (self.min_floor_dbfs / 20.0)
+        threshold = max(relative_threshold, absolute_threshold)
+        active = np.flatnonzero(frame_rms >= threshold)
+        if active.size == 0:
+            return waveform
+
+        pad = int(round(self.sample_rate * self.trim_pad_ms / 1000.0))
+        start = max(0, int(active[0]) * hop_len - pad)
+        end = min(waveform.size, int(active[-1]) * hop_len + frame_len + pad)
+        return waveform[start:end].copy()
+
+    def _normalize_loudness(self, waveform: np.ndarray) -> np.ndarray:
+        current_rms = float(np.sqrt(np.mean(np.square(waveform), dtype=np.float64)))
+        if current_rms <= self.eps:
+            return waveform
+
+        target_rms = 10.0 ** (self.target_rms_dbfs / 20.0)
+        gain = target_rms / current_rms
+
+        peak_limit = 10.0 ** (self.peak_limit_dbfs / 20.0)
+        predicted_peak = float(np.max(np.abs(waveform), initial=0.0)) * gain
+        if predicted_peak > peak_limit and predicted_peak > self.eps:
+            gain *= peak_limit / predicted_peak
+
+        return np.clip(waveform * gain, -1.0, 1.0).astype(np.float32)
+
     def _pad_or_trim_time(self, feat: np.ndarray) -> np.ndarray:
         # The Ultra96 voice model expects a fixed number of time frames: 50.
         frame_count = feat.shape[1]
@@ -146,8 +209,11 @@ class VoicePreprocessor:
         if sample_rate != self.sample_rate:
             raise ValueError(f"Expected sample_rate={self.sample_rate}, got {sample_rate}")
 
-        # MFCC pipeline: pre-emphasis -> STFT power -> mel -> log -> DCT -> fixed frame count.
+        # Live path mirrors the offline training cleanup:
+        # trim silence -> loudness normalize -> pre-emphasis -> STFT -> mel -> log -> DCT -> fixed frame count.
         # Dataset-level normalization is fused into conv1 weights during export instead of per-clip CMVN.
+        waveform = self._trim_silence(waveform)
+        waveform = self._normalize_loudness(waveform)
         waveform = self._pre_emphasize(waveform)
         power_spec = self._stft_power(waveform)
         mel_spec = np.matmul(self.mel_fb, power_spec)

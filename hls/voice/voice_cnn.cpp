@@ -9,7 +9,7 @@ typedef ap_fixed<24, 14, AP_TRN, AP_WRAP> acc_t;
 // Keep multipliers at 16x16 -> 32-bit fixed-point to avoid very wide DSP mapping.
 typedef ap_fixed<32, 16, AP_TRN, AP_WRAP> mul_t;
 
-// ReLU
+// ReLU used by the HLS-standard VoiceCNN shared with the training notebook.
 static inline data_t relu(data_t x) {
     return (x > (data_t)0) ? x : (data_t)0;
 }
@@ -136,7 +136,7 @@ void voice_cnn(hls::stream<axis_t> &in_stream, hls::stream<axis_t> &out_stream) 
 
     // ============================================================
     // 4) Block2: Conv k=3 (VOICE_B1_CH -> VOICE_B2_CH) + ReLU => [VOICE_B2_CH, VOICE_B2_T]
-    // VOICE_B2_T should be 25 for your PyTorch AdaptiveAvgPool1d(1) design.
+    // VOICE_B2_T is 25, matching the notebook's AdaptiveAvgPool1d(1) over time after conv2.
     // Now no boundary checks because we use b1_pad.
     // ============================================================
     const data_t invT = (data_t)(1.0f / VOICE_B2_T);

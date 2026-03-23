@@ -5,12 +5,12 @@
 #include <ap_axi_sdata.h>
 #include <hls_stream.h>
 
-// Voice model configuration
+// Voice model configuration shared with notebooks/train_voice_cnn.ipynb
 #define VOICE_NUM_MFCC 40
 #define VOICE_NUM_FRAMES 50
-#define VOICE_NUM_CLASSES 3   // marvin, sheila, visual
+#define VOICE_NUM_CLASSES 3   // bulbasaur, charizard, pikachu
 
-// Standard VoiceCNN architecture:
+// HLS-standard VoiceCNN architecture:
 // Block 1: conv 40->16 (k=3) + maxpool2 => 25
 #define VOICE_B1_CH 16
 #define VOICE_B1_T 25
