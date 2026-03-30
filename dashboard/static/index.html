@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CG4002 AI Test Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Local Model Testing</p>
+        <h1>Gesture and voice inference in one place.</h1>
+        <p class="lede">
+          Stream live gesture packets from the ESP32, upload or record voice clips in the browser,
+          and inspect both the raw signals and the processed model inputs.
+        </p>
+      </div>
+      <div class="hero-meta">
+        <div class="stat">
+          <span class="label">Gesture Source</span>
+          <span id="gesture-source" class="value">Waiting for hardware</span>
+        </div>
+        <div class="stat">
+          <span class="label">Voice Source</span>
+          <span id="voice-source" class="value">Waiting for upload</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="view-toggle" role="tablist" aria-label="Dashboard view">
+      <button id="view-both" class="toggle-button is-active" type="button">Both</button>
+      <button id="view-gesture" class="toggle-button" type="button">Gesture</button>
+      <button id="view-voice" class="toggle-button" type="button">Voice</button>
+    </div>
+
+    <section id="dashboard-grid" class="grid">
+      <article class="panel" data-panel="gesture">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Gesture</p>
+            <h2>Live ESP32 inference</h2>
+          </div>
+          <div id="gesture-status" class="chip">Idle</div>
+        </div>
+        <div class="result-strip">
+          <div>
+            <span class="label">Prediction</span>
+            <strong id="gesture-label">No data yet</strong>
+          </div>
+          <div>
+            <span class="label">Confidence</span>
+            <strong id="gesture-confidence">-</strong>
+          </div>
+          <div>
+            <span class="label">Samples</span>
+            <strong id="gesture-samples">-</strong>
+          </div>
+        </div>
+        <div class="prob-list" id="gesture-probs"></div>
+        <div class="chart-stack">
+          <div class="chart-card">
+            <div class="chart-title">Raw IMU window</div>
+            <canvas id="gesture-raw" width="760" height="220"></canvas>
+            <div class="data-table-wrap">
+              <table class="data-table" id="gesture-raw-table"></table>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Processed IMU window</div>
+            <canvas id="gesture-processed" width="760" height="220"></canvas>
+            <div class="data-table-wrap">
+              <table class="data-table" id="gesture-processed-table"></table>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel" data-panel="voice">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Voice</p>
+            <h2>Browser upload and recording</h2>
+          </div>
+          <div id="voice-status" class="chip">Ready</div>
+        </div>
+        <div class="voice-actions">
+          <label class="button secondary">
+            <input id="voice-file" type="file" accept="audio/*" hidden>
+            Upload audio file
+          </label>
+          <button id="record-toggle" class="button">Start recording</button>
+        </div>
+        <p class="hint">
+          Upload a WAV/M4A file or record directly in the browser. The server will decode it, run MFCC extraction,
+          and return the prediction plus visualisation data.
+        </p>
+        <div id="voice-player-wrap" class="audio-wrap" hidden>
+          <div class="audio-grid">
+            <div>
+              <div class="chart-title">Playback</div>
+              <audio id="voice-player" controls preload="metadata"></audio>
+            </div>
+            <div>
+              <div class="chart-title">Processed playback</div>
+              <audio id="voice-processed-player" controls preload="metadata"></audio>
+            </div>
+          </div>
+        </div>
+        <div class="result-strip">
+          <div>
+            <span class="label">Prediction</span>
+            <strong id="voice-label">No clip yet</strong>
+          </div>
+          <div>
+            <span class="label">Confidence</span>
+            <strong id="voice-confidence">-</strong>
+          </div>
+          <div>
+            <span class="label">File</span>
+            <strong id="voice-file-name">-</strong>
+          </div>
+        </div>
+        <div class="prob-list" id="voice-probs"></div>
+        <div class="chart-stack">
+          <div class="chart-card">
+            <div class="chart-title">Raw waveform</div>
+            <canvas id="voice-waveform" width="760" height="220"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Processed waveform</div>
+            <canvas id="voice-normalized" width="760" height="220"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Processed MFCC (40 x 50)</div>
+            <canvas id="voice-mfcc" width="760" height="260"></canvas>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -26,9 +26,9 @@ from common import (
 def _make_test_imu_window() -> list[dict[str, float]]:
     return [
         {
-            "y": float(i % 6),
-            "p": float((i % 5) * 0.1),
-            "r": float((i % 4) * -0.1),
+            "gx": float(i % 6),
+            "gy": float((i % 5) * 0.1),
+            "gz": float((i % 4) * -0.1),
             "ax": 0.01 * i,
             "ay": -0.02 * i,
             "az": 9.81,

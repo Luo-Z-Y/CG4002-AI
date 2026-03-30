@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Offline cleanup for the voice dataset.
 
-This script is intended for training-data preparation, not live deployment.
+This script is intended for listening checks and dataset QA only.
 It trims leading/trailing silence, applies consistent loudness normalization,
 and writes cleaned `.wav` files into a separate output folder while preserving
 the class subfolder layout.
+
+The active training pipeline should build features from the raw audio folder
+through the shared deployment preprocessor instead of reusing these cleaned
+files, otherwise trim/normalise can be applied twice.
 
 Example:
     python tools/preprocess_voice_audio.py \

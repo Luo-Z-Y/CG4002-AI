@@ -59,18 +59,24 @@ def _require_number_row(value: Any, row_idx: int, expected_cols: int) -> list[fl
 
 @dataclass(slots=True)
 class ImuSample:
-    y: float
-    p: float
-    r: float
+    """Single IMU reading with raw gyroscope and accelerometer axes.
+
+    Field order matches the training CSV: gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z.
+    Prior builds used y/p/r (yaw/pitch/roll); from 2026-03-28 the pipeline uses raw gyro.
+    """
+
+    gx: float
+    gy: float
+    gz: float
     ax: float
     ay: float
     az: float
 
     def to_dict(self) -> dict[str, float]:
         return {
-            "y": self.y,
-            "p": self.p,
-            "r": self.r,
+            "gx": self.gx,
+            "gy": self.gy,
+            "gz": self.gz,
             "ax": self.ax,
             "ay": self.ay,
             "az": self.az,
@@ -80,9 +86,9 @@ class ImuSample:
     def from_dict(cls, data: Mapping[str, Any]) -> "ImuSample":
         data = _require_mapping(data, "imu_sample")
         return cls(
-            y=_require_number(data.get("y"), "imu_sample.y"),
-            p=_require_number(data.get("p"), "imu_sample.p"),
-            r=_require_number(data.get("r"), "imu_sample.r"),
+            gx=_require_number(data.get("gx"), "imu_sample.gx"),
+            gy=_require_number(data.get("gy"), "imu_sample.gy"),
+            gz=_require_number(data.get("gz"), "imu_sample.gz"),
             ax=_require_number(data.get("ax"), "imu_sample.ax"),
             ay=_require_number(data.get("ay"), "imu_sample.ay"),
             az=_require_number(data.get("az"), "imu_sample.az"),

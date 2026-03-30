@@ -64,7 +64,7 @@ class Ultra96Runtime:
             raise ValueError(f"Ultra96 gesture runtime expects exactly 60 IMU samples, got {data.count}")
 
         window = np.asarray(
-            [[sample.y, sample.p, sample.r, sample.ax, sample.ay, sample.az] for sample in data.samples],
+            [[sample.gx, sample.gy, sample.gz, sample.ax, sample.ay, sample.az] for sample in data.samples],
             dtype=np.float32,
         )
         pred_idx = self._predict_gesture(window)

@@ -1,260 +1,104 @@
 # Ultra96
 
-This folder is organized into three isolated subfolders.
+Ultra96-related runtime code, test utilities, and deployment support for the CG4002 AI system.
 
 ## Structure
 
 ```text
 ultra96/
 ├── README.md
+├── deployment/
 ├── local-ai-test/
-├── mqtt-test/
-└── deployment/
+└── mqtt-test/
 ```
 
-## local-ai-test
+## Subfolders
 
-Purpose:
+### deployment
 
-- run the local Ultra96 accelerator against saved gesture and voice test datasets
+The always-on MQTT inference bridge used on the Ultra96 board.
 
-Contents:
+Key files:
 
-- `dual_cnn_test.py`
-- `run_assessment_suite.py`
-- `dual_cnn.xsa`
-- `gesture_X_test.npy`, `gesture_y_test.npy`
-- `voice_X_test.npy`, `voice_y_test.npy`
+- [deployment.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/deployment.py)
+- [runtime.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/runtime.py)
+- [audio.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/audio.py)
+- [imu.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/imu.py)
+- [hardware.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/hardware.py)
 
-Run from inside the folder:
+Detailed guide:
+
+- [deployment/README.md](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/README.md)
+
+### local-ai-test
+
+Offline board-side testing against saved `.npy` datasets and the compiled overlay.
+
+Key files:
+
+- [dual_cnn_test.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/local-ai-test/dual_cnn_test.py)
+- [run_assessment_suite.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/local-ai-test/run_assessment_suite.py)
+- [dual_cnn.xsa](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/local-ai-test/dual_cnn.xsa)
+
+Typical usage:
 
 ```bash
-cd local-ai-test
+cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/local-ai-test
 python3 dual_cnn_test.py --mode both
 ```
 
-or
+### mqtt-test
+
+MQTT smoke tests for the deployed bridge.
+
+Key file:
+
+- [self_test.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/mqtt-test/self_test.py)
+
+Typical usage:
 
 ```bash
-cd local-ai-test
-python3 run_assessment_suite.py
-```
-
-## mqtt-test
-
-Purpose:
-
-- smoke-test the MQTT request/reply path
-
-Contents:
-
-- `self_test.py`
-- `common.py`
-
-Run from inside the folder after the deployment bridge is already running:
-
-```bash
-cd mqtt-test
+cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/mqtt-test
 python3 self_test.py
 ```
 
-What it does:
+## Current Runtime Design
 
-- publishes one synthetic 60-sample IMU request to `esp32/1/sensor/imu`
-- waits for one reply on `ultra96/ai/action`
+### Gesture
 
-## deployment
+- Input to Ultra96 runtime: preprocessed `60 x 6` IMU window
+- Quantisation: Q8.8 packing on PS before DMA
+- Normalisation: fused into exported gesture weights
+- Output: winning class index from hardware, converted back to a gesture label in software
 
-Purpose:
+### Voice
 
-- run the always-on Ultra96 AI inference bridge for deployment
+- Input to Ultra96 runtime: normalised `40 x 50` MFCC
+- Quantisation: Q8.8 packing on PS before DMA
+- Normalisation: applied in software using `voice_mean.npy` and `voice_std.npy`
+- Output: winning class index from hardware, converted back to a Pokemon label in software
 
-Contents:
+## Topics And Results
 
-- `deployment.py`
-- `mqtt_ai_bridge.py`
-- `common.py`
-- `audio.py`
-- `hardware.py`
-- `messages.py`
-- `runtime.py`
-- `dual_cnn.xsa`
+The deployment bridge subscribes to:
 
-Run from inside the folder:
+- IMU: `esp32/+/sensor/imu`
+- voice: `phone/+/viz/mic`
 
-```bash
-cd deployment
-python3 deployment.py
-```
+It publishes:
 
-Example CLI commands:
+- gesture result: `ultra96/ai/action`
+- voice result: `ultra96/ai/pokemon`
+- errors: `ultra96/ai/error`
 
-1. Default deployment bridge:
+See the deployment README for the exact packet formats.
 
-```bash
-cd deployment
-python3 deployment.py
-```
+## Practical Recommendation
 
-2. Explicit broker, credentials, and TLS CA:
+Use the local dashboard first to validate:
 
-```bash
-cd deployment
-python3 deployment.py \
-  --host 13.238.81.254 \
-  --port 8883 \
-  --username mqttuser \
-  --password cg4002 \
-  --cafile /home/xilinx/ca.crt
-```
+- gesture packet quality
+- voice preprocessing quality
+- model labels and confidence
 
-3. Same as above but with a custom client ID and longer connect timeout:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --client-id ultra96-ai-board1 \
-  --connect-timeout-s 20 \
-  --keepalive 60
-```
-
-4. Enable voice subscription with the intended deployment topic:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --voice-topic 'phone/+/viz/mic'
-```
-
-5. Override all MQTT topics explicitly:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --imu-topic 'esp32/+/sensor/imu' \
-  --voice-topic 'phone/+/viz/mic' \
-  --action-topic 'ultra96/ai/action' \
-  --pokemon-topic 'ultra96/ai/pokemon' \
-  --error-topic 'ultra96/ai/error'
-```
-
-6. Run with custom overlay path and explicit IP/DMA names:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --xsa-path dual_cnn.xsa \
-  --gesture-core gesture_cnn_0 \
-  --voice-core voice_cnn_0 \
-  --gesture-dma axi_dma_1 \
-  --voice-dma axi_dma_0
-```
-
-7. Tune runtime timeout and placeholder confidence:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --timeout-s 2.0 \
-  --default-confidence 1.0
-```
-
-8. Use explicit label lists for gesture and voice outputs:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --gesture-labels 'WALKING,WALKING_UPSTAIRS,WALKING_DOWNSTAIRS,SITTING,STANDING,LAYING' \
-  --voice-labels 'marvin,sheila,visual'
-```
-
-9. Voice preprocessing with a custom sample rate, spool directory, and `ffmpeg` path:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --voice-topic 'phone/+/viz/mic' \
-  --voice-sample-rate 16000 \
-  --voice-spool-dir ./spool \
-  --ffmpeg-path /usr/bin/ffmpeg
-```
-
-10. Keep temporary voice files for debugging:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --voice-topic 'phone/+/viz/mic' \
-  --keep-voice-files
-```
-
-11. MQTT QoS tuning:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --subscribe-qos 1 \
-  --publish-qos 1
-```
-
-12. TLS with client certificate and insecure verification disabled:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --cafile /home/xilinx/ca.crt \
-  --certfile /home/xilinx/client.crt \
-  --keyfile /home/xilinx/client.key
-```
-
-13. TLS with insecure verification enabled for test setups only:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --cafile /home/xilinx/ca.crt \
-  --tls-insecure
-```
-
-14. A fuller deployment example combining the main runtime options:
-
-```bash
-cd deployment
-python3 deployment.py \
-  --host 13.238.81.254 \
-  --port 8883 \
-  --username mqttuser \
-  --password cg4002 \
-  --cafile /home/xilinx/ca.crt \
-  --imu-topic 'esp32/+/sensor/imu' \
-  --voice-topic 'phone/+/viz/mic' \
-  --action-topic 'ultra96/ai/action' \
-  --pokemon-topic 'ultra96/ai/pokemon' \
-  --error-topic 'ultra96/ai/error' \
-  --xsa-path dual_cnn.xsa \
-  --gesture-core gesture_cnn_0 \
-  --voice-core voice_cnn_0 \
-  --gesture-dma axi_dma_1 \
-  --voice-dma axi_dma_0 \
-  --timeout-s 2.0 \
-  --ffmpeg-path /usr/bin/ffmpeg
-```
-
-Current default deployment settings:
-
-- broker host: `13.238.81.254`
-- broker port: `8883`
-- CA file: `/home/xilinx/ca.crt`
-- subscribe IMU: `esp32/+/sensor/imu`
-- publish action: `ultra96/ai/action`
-- publish pokemon: `ultra96/ai/pokemon`
-- publish errors: `ultra96/ai/error`
-
-Voice  is disabled by default until `phone/<player>/viz/mic` is deployed.
-
-## Notes
-
-- each subfolder is intended to run on its own from within that folder
-- `deployment/` is self-contained and does not depend on sibling folders
-- `mqtt-test/` is only for smoke testing
-- `local-ai-test/` is only for offline/local evaluation
+Only move to Ultra96 deployment after the software-only dashboard path behaves correctly.

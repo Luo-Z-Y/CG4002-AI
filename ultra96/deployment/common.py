@@ -13,13 +13,14 @@ import hardware as hw
 
 DEFAULT_XSA_PATH = (SCRIPT_DIR / "dual_cnn.xsa").resolve()
 DEFAULT_SPOOL_DIR = SCRIPT_DIR / "spool"
+DEFAULT_CAPTURE_DIR = SCRIPT_DIR / "captured"
 DEFAULT_BROKER_HOST = "13.238.81.254"
 DEFAULT_BROKER_PORT = 8883
 DEFAULT_CAFILE = "/home/xilinx/ca.crt"
 DEFAULT_USERNAME = "mqttuser"
 DEFAULT_PASSWORD = "cg4002"
 DEFAULT_IMU_TOPIC = "esp32/+/sensor/imu"
-DEFAULT_VOICE_TOPIC = None
+DEFAULT_VOICE_TOPIC = "phone/+/viz/mic"
 DEFAULT_ACTION_TOPIC = "ultra96/ai/action"
 DEFAULT_POKEMON_TOPIC = "ultra96/ai/pokemon"
 DEFAULT_ERROR_TOPIC = "ultra96/ai/error"
