@@ -25,7 +25,7 @@ if str(DEPLOYMENT_DIR) not in sys.path:
     sys.path.insert(0, str(DEPLOYMENT_DIR))
 
 from audio import VoicePreprocessor, load_feature_norm_stats, normalize_feature_matrix  # type: ignore  # noqa: E402
-from imu import ImuPreprocessor  # type: ignore  # noqa: E402
+from imu import ImuPreprocessor, load_feature_norm_stats as load_gesture_norm_stats, normalize_window  # type: ignore  # noqa: E402
 
 
 GESTURE_LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
@@ -252,6 +252,8 @@ class LocalAiRuntime:
         self,
         gesture_weights: str | Path | None = None,
         voice_weights: str | Path | None = None,
+        gesture_mean: str | Path | None = None,
+        gesture_std: str | Path | None = None,
         voice_mean: str | Path | None = None,
         voice_std: str | Path | None = None,
     ) -> None:
@@ -259,12 +261,35 @@ class LocalAiRuntime:
         voice_header = Path(voice_weights) if voice_weights is not None else REPO_ROOT / "hls" / "voice" / "voice_cnn_weights.h"
         self.gesture_weights_path = gesture_header.resolve()
         self.voice_weights_path = voice_header.resolve()
+        self.gesture_mean_path, self.gesture_std_path = self._resolve_gesture_norm_paths(gesture_mean, gesture_std)
+        self.gesture_mean, self.gesture_std = load_gesture_norm_stats(self.gesture_mean_path, self.gesture_std_path)
         self.voice_mean_path, self.voice_std_path = self._resolve_voice_norm_paths(voice_mean, voice_std)
         self.voice_mean, self.voice_std = load_feature_norm_stats(self.voice_mean_path, self.voice_std_path)
         self.gesture_model = _load_gesture_model(self.gesture_weights_path)
         self.voice_model = _load_voice_model(self.voice_weights_path)
         self.gesture_preprocessor = ImuPreprocessor()
         self.voice_preprocessor = VoicePreprocessor(sample_rate=16000)
+
+    def _resolve_gesture_norm_paths(
+        self,
+        gesture_mean: str | Path | None,
+        gesture_std: str | Path | None,
+    ) -> tuple[Path, Path]:
+        if (gesture_mean is None) != (gesture_std is None):
+            raise ValueError("gesture_mean and gesture_std must be provided together")
+
+        if gesture_mean is not None and gesture_std is not None:
+            return Path(gesture_mean).resolve(), Path(gesture_std).resolve()
+
+        candidates = [
+            (self.gesture_weights_path.parent / "gesture_mean.npy", self.gesture_weights_path.parent / "gesture_std.npy"),
+            (REPO_ROOT / "ultra96" / "deployment" / "gesture_mean.npy", REPO_ROOT / "ultra96" / "deployment" / "gesture_std.npy"),
+            (REPO_ROOT / "data" / "gesture" / "20260328peer" / "mean.npy", REPO_ROOT / "data" / "gesture" / "20260328peer" / "std.npy"),
+        ]
+        for mean_path, std_path in candidates:
+            if mean_path.exists() and std_path.exists():
+                return mean_path.resolve(), std_path.resolve()
+        raise FileNotFoundError("Could not locate gesture_mean.npy and gesture_std.npy for dashboard gesture normalization")
 
     def _resolve_voice_norm_paths(
         self,
@@ -304,14 +329,16 @@ class LocalAiRuntime:
         data = self.gesture_preprocessor.preprocess(normalized_samples)
         processed_window = self.gesture_preprocessor.last_capture["resampled_window"].astype(np.float32)
         raw_window = self.gesture_preprocessor.last_capture["raw_window"].astype(np.float32)
+        model_input = normalize_window(processed_window, self.gesture_mean, self.gesture_std)
 
-        tensor = torch.tensor(processed_window.T[None, :, :], dtype=torch.float32)
+        tensor = torch.tensor(model_input.T[None, :, :], dtype=torch.float32)
         logits = self.gesture_model(tensor)
         result = _softmax_result(logits, GESTURE_LABELS)
         result.update(
             {
                 "raw_window": raw_window.astype(float).tolist(),
                 "processed_window": processed_window.astype(float).tolist(),
+                "model_input_window": model_input.astype(float).tolist(),
                 "debug": self.gesture_preprocessor.last_debug,
                 "sample_count": int(data.count),
             }

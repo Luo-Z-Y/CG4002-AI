@@ -168,8 +168,8 @@ Note: `confidence` is currently a placeholder default because the deployed hardw
 
 ### Required for voice software normalisation
 
-- [data/audio/combined/voice_mean.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined/voice_mean.npy)
-- [data/audio/combined/voice_std.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined/voice_std.npy)
+- [voice_mean.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy)
+- [voice_std.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
 
 ### Required in the overlay build itself
 
@@ -188,8 +188,8 @@ Explicit voice normalisation paths:
 
 ```bash
 python3 deployment.py \
-  --voice-mean ../../data/audio/combined/voice_mean.npy \
-  --voice-std ../../data/audio/combined/voice_std.npy
+  --voice-mean ./voice_mean.npy \
+  --voice-std ./voice_std.npy
 ```
 
 Explicit overlay, core names, and DMA names:

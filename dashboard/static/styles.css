@@ -159,7 +159,8 @@ body {
 
 .panel-head,
 .result-strip,
-.voice-actions {
+.voice-actions,
+.review-actions {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -197,6 +198,47 @@ body {
   display: grid;
   gap: 10px;
   margin-top: 16px;
+}
+
+.review-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--line);
+}
+
+.review-copy strong {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.98rem;
+}
+
+.review-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.review-button {
+  padding: 10px 14px;
+}
+
+.review-select {
+  min-width: 158px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fffef9;
+  color: var(--ink);
+  font: inherit;
+}
+
+.review-select:disabled {
+  opacity: 0.55;
 }
 
 .prob-row {
@@ -346,6 +388,14 @@ canvas {
 
   .audio-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-card {
+    grid-template-columns: 1fr;
+  }
+
+  .review-actions {
+    justify-content: flex-start;
   }
 }
 

@@ -26,6 +26,10 @@
           <span class="label">Voice Source</span>
           <span id="voice-source" class="value">Waiting for upload</span>
         </div>
+        <div class="stat">
+          <span class="label">Capture Session</span>
+          <span id="session-dir" class="value">Starting server session</span>
+        </div>
       </div>
     </section>
 
@@ -56,6 +60,19 @@
           <div>
             <span class="label">Samples</span>
             <strong id="gesture-samples">-</strong>
+          </div>
+        </div>
+        <div class="review-card">
+          <div class="review-copy">
+            <span class="label">Review</span>
+            <strong id="gesture-review-status">Waiting for first gesture sample</strong>
+          </div>
+          <div class="review-actions">
+            <button id="gesture-mark-correct" class="button review-button secondary" type="button" disabled>Correct</button>
+            <select id="gesture-correct-label" class="review-select" disabled>
+              <option value="">Correct label</option>
+            </select>
+            <button id="gesture-mark-wrong" class="button review-button" type="button" disabled>Save label</button>
           </div>
         </div>
         <div class="prob-list" id="gesture-probs"></div>
@@ -120,6 +137,19 @@
           <div>
             <span class="label">File</span>
             <strong id="voice-file-name">-</strong>
+          </div>
+        </div>
+        <div class="review-card">
+          <div class="review-copy">
+            <span class="label">Review</span>
+            <strong id="voice-review-status">Waiting for first voice sample</strong>
+          </div>
+          <div class="review-actions">
+            <button id="voice-mark-correct" class="button review-button secondary" type="button" disabled>Correct</button>
+            <select id="voice-correct-label" class="review-select" disabled>
+              <option value="">Correct label</option>
+            </select>
+            <button id="voice-mark-wrong" class="button review-button" type="button" disabled>Save label</button>
           </div>
         </div>
         <div class="prob-list" id="voice-probs"></div>

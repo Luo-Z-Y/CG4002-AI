@@ -27,7 +27,6 @@ def main() -> None:
     if x.ndim != 3:
         raise ValueError(f"Expected gesture features rank-3, got {x.shape}")
 
-    # Canonical to [N, 60, 6]
     if x.shape[1:] == (60, 6):
         xw = x
     elif x.shape[1:] == (6, 60):
@@ -52,7 +51,6 @@ def main() -> None:
     xs = xw[idx]
     ys = y[idx]
 
-    # HLS expects stream order [t][c].
     xs_flat = xs.reshape(num_cases, -1).astype(np.float32)
     xs_q88 = q88_pack_u32(xs_flat)
 

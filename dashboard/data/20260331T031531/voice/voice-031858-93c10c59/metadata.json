@@ -1,0 +1,93 @@
+{
+  "sample_id": "voice-031858-93c10c59",
+  "kind": "voice",
+  "created_at": 1774898338.439876,
+  "source": "voice-web",
+  "filename": "recorded-clip.webm",
+  "content_type": "audio/webm;codecs=opus",
+  "prediction": {
+    "label": "Bulbasaur",
+    "confidence": 0.9532593488693237,
+    "probabilities": [
+      {
+        "label": "Bulbasaur",
+        "index": 0,
+        "probability": 0.9532593488693237
+      },
+      {
+        "label": "Charizard",
+        "index": 1,
+        "probability": 0.0452166385948658
+      },
+      {
+        "label": "Pikachu",
+        "index": 2,
+        "probability": 0.0015239528147503734
+      }
+    ]
+  },
+  "sample_rate": 16000,
+  "request_meta": {
+    "filename": "recorded-clip.webm",
+    "content_type": "audio/webm;codecs=opus",
+    "source": "voice-web"
+  },
+  "debug": {
+    "raw_samples": 61440,
+    "trimmed_samples": 16480,
+    "normalized_samples": 16480,
+    "emphasized_samples": 16480,
+    "raw": {
+      "min": -1.0008679628372192,
+      "max": 1.0112205743789673,
+      "mean": 2.4756020138738677e-05,
+      "std": 0.09615680575370789,
+      "rms": 0.0961568150325909,
+      "peak": 1.0112205743789673
+    },
+    "trimmed": {
+      "min": -1.0008679628372192,
+      "max": 1.0112205743789673,
+      "mean": 8.587123738834634e-05,
+      "std": 0.18560516834259033,
+      "rms": 0.1856051837548371,
+      "peak": 1.0112205743789673
+    },
+    "normalized": {
+      "min": -0.6788700819015503,
+      "max": 0.6858920454978943,
+      "mean": 5.8244841056875885e-05,
+      "std": 0.1258925199508667,
+      "rms": 0.12589253768920194,
+      "peak": 0.6858920454978943
+    },
+    "emphasized": {
+      "min": -0.6788700819015503,
+      "max": 0.6858920454978943,
+      "mean": 5.8244841056875885e-05,
+      "std": 0.1258925199508667,
+      "rms": 0.12589253768920194,
+      "peak": 0.6858920454978943
+    },
+    "power_shape": [
+      257,
+      104
+    ],
+    "mel_shape": [
+      40,
+      104
+    ],
+    "mfcc_shape": [
+      40,
+      50
+    ],
+    "pre_emphasis": 0.0
+  },
+  "review": {
+    "status": "reviewed",
+    "is_correct": true,
+    "predicted_label": "Bulbasaur",
+    "correct_label": "Bulbasaur",
+    "reviewed_at": 1774898340.336867
+  }
+}

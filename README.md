@@ -157,8 +157,8 @@ After fully rerunning the notebooks, the usual files to copy to your Windows HLS
 
 For voice deployment, the software path also needs:
 
-- [data/audio/combined/voice_mean.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined/voice_mean.npy)
-- [data/audio/combined/voice_std.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined/voice_std.npy)
+- [ultra96/deployment/voice_mean.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy)
+- [ultra96/deployment/voice_std.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
 
 ## Local Dashboard
 
@@ -179,8 +179,8 @@ Optional explicit artefact paths:
   --port 8000 \
   --gesture-weights data/gesture/20260328peer/gesture_cnn_weights.h \
   --voice-weights data/audio/combined/voice_cnn_weights.h \
-  --voice-mean data/audio/combined/voice_mean.npy \
-  --voice-std data/audio/combined/voice_std.npy
+  --voice-mean ultra96/deployment/voice_mean.npy \
+  --voice-std ultra96/deployment/voice_std.npy
 ```
 
 The dashboard supports:

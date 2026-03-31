@@ -46,7 +46,6 @@ def main() -> None:
     xs = x[idx]
     ys = y[idx]
 
-    # HLS expects time-major stream order [t][c].
     xs_tc_flat = xs.transpose(0, 2, 1).reshape(num_cases, -1).astype(np.float32)
     xs_q88 = q88_pack_u32(xs_tc_flat)
 

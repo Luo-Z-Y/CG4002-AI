@@ -4,6 +4,10 @@ const gestureSamples = document.getElementById("gesture-samples");
 const gestureSource = document.getElementById("gesture-source");
 const gestureStatus = document.getElementById("gesture-status");
 const gestureProbs = document.getElementById("gesture-probs");
+const gestureReviewStatus = document.getElementById("gesture-review-status");
+const gestureMarkCorrect = document.getElementById("gesture-mark-correct");
+const gestureCorrectLabel = document.getElementById("gesture-correct-label");
+const gestureMarkWrong = document.getElementById("gesture-mark-wrong");
 
 const voiceLabel = document.getElementById("voice-label");
 const voiceConfidence = document.getElementById("voice-confidence");
@@ -11,6 +15,10 @@ const voiceFileName = document.getElementById("voice-file-name");
 const voiceSource = document.getElementById("voice-source");
 const voiceStatus = document.getElementById("voice-status");
 const voiceProbs = document.getElementById("voice-probs");
+const voiceReviewStatus = document.getElementById("voice-review-status");
+const voiceMarkCorrect = document.getElementById("voice-mark-correct");
+const voiceCorrectLabel = document.getElementById("voice-correct-label");
+const voiceMarkWrong = document.getElementById("voice-mark-wrong");
 const voiceFile = document.getElementById("voice-file");
 const recordToggle = document.getElementById("record-toggle");
 const voicePlayerWrap = document.getElementById("voice-player-wrap");
@@ -20,6 +28,7 @@ const dashboardGrid = document.getElementById("dashboard-grid");
 const viewBothButton = document.getElementById("view-both");
 const viewGestureButton = document.getElementById("view-gesture");
 const viewVoiceButton = document.getElementById("view-voice");
+const sessionDir = document.getElementById("session-dir");
 
 const gestureRawCanvas = document.getElementById("gesture-raw");
 const gestureProcessedCanvas = document.getElementById("gesture-processed");
@@ -38,6 +47,18 @@ let recordedChunks = [];
 let currentVoiceUrl = null;
 let currentProcessedVoiceUrl = null;
 let currentProcessedVoiceBase64 = null;
+let currentGestureSampleId = null;
+let currentVoiceSampleId = null;
+
+function populateLabelOptions(select, labels) {
+  select.innerHTML = '<option value="">Correct label</option>';
+  for (const label of labels) {
+    const option = document.createElement("option");
+    option.value = label;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+}
 
 function setDashboardView(mode) {
   dashboardGrid.classList.remove("focus-gesture", "focus-voice");
@@ -103,6 +124,85 @@ function renderProbabilities(container, probabilities) {
     `;
     container.appendChild(row);
   }
+}
+
+function renderReviewState(kind, sample) {
+  const isGesture = kind === "gesture";
+  const statusNode = isGesture ? gestureReviewStatus : voiceReviewStatus;
+  const correctButton = isGesture ? gestureMarkCorrect : voiceMarkCorrect;
+  const labelSelect = isGesture ? gestureCorrectLabel : voiceCorrectLabel;
+  const wrongButton = isGesture ? gestureMarkWrong : voiceMarkWrong;
+  const labels = isGesture ? ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"] : ["Bulbasaur", "Charizard", "Pikachu"];
+
+  populateLabelOptions(labelSelect, labels);
+
+  if (!sample || !sample.sample_id) {
+    statusNode.textContent = `Waiting for first ${kind} sample`;
+    correctButton.disabled = true;
+    labelSelect.disabled = true;
+    wrongButton.disabled = true;
+    return;
+  }
+
+  const review = sample.review || {};
+  if (review.status === "reviewed") {
+    if (review.is_correct) {
+      statusNode.textContent = `Saved: prediction confirmed for ${sample.sample_id}`;
+    } else {
+      statusNode.textContent = `Saved: corrected to ${review.correct_label} for ${sample.sample_id}`;
+      labelSelect.value = review.correct_label || "";
+    }
+  } else {
+    statusNode.textContent = `Sample ${sample.sample_id} captured. Mark whether ${sample.label} is correct.`;
+  }
+
+  correctButton.disabled = false;
+  labelSelect.disabled = false;
+  wrongButton.disabled = false;
+}
+
+async function submitReview(kind, isCorrect) {
+  const sampleId = kind === "gesture" ? currentGestureSampleId : currentVoiceSampleId;
+  const labelSelect = kind === "gesture" ? gestureCorrectLabel : voiceCorrectLabel;
+  const statusNode = kind === "gesture" ? gestureReviewStatus : voiceReviewStatus;
+
+  if (!sampleId) {
+    return;
+  }
+
+  const payload = {
+    kind,
+    sample_id: sampleId,
+    is_correct: isCorrect,
+  };
+  if (!isCorrect) {
+    if (!labelSelect.value) {
+      alert("Choose the correct label first.");
+      return;
+    }
+    payload.correct_label = labelSelect.value;
+  }
+
+  statusNode.textContent = "Saving review...";
+  const response = await fetch("/api/review", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to save review");
+  }
+
+  const stateKey = kind === "gesture" ? "gesture" : "voice";
+  const latest = result.review;
+  if (kind === "gesture" && window.__latestGesture) {
+    window.__latestGesture.review = latest;
+  }
+  if (kind === "voice" && window.__latestVoice) {
+    window.__latestVoice.review = latest;
+  }
+  renderReviewState(kind, kind === "gesture" ? window.__latestGesture : window.__latestVoice);
 }
 
 function renderMatrixTable(table, matrix, labels) {
@@ -234,6 +334,8 @@ function drawHeatmap(canvas, matrix) {
 
 function updateGestureView(gesture) {
   if (!gesture) return;
+  window.__latestGesture = gesture;
+  currentGestureSampleId = gesture.sample_id || null;
   gestureLabel.textContent = gesture.label;
   gestureConfidence.textContent = `${(gesture.confidence * 100).toFixed(1)}%`;
   gestureSamples.textContent = `${gesture.sample_count ?? "-"}`;
@@ -244,10 +346,13 @@ function updateGestureView(gesture) {
   drawMultiSeries(gestureProcessedCanvas, gesture.processed_window, ["gx", "gy", "gz", "ax", "ay", "az"]);
   renderMatrixTable(gestureRawTable, gesture.raw_window, ["gx", "gy", "gz", "ax", "ay", "az"]);
   renderMatrixTable(gestureProcessedTable, gesture.processed_window, ["gx", "gy", "gz", "ax", "ay", "az"]);
+  renderReviewState("gesture", gesture);
 }
 
 function updateVoiceView(voice) {
   if (!voice) return;
+  window.__latestVoice = voice;
+  currentVoiceSampleId = voice.sample_id || null;
   voiceLabel.textContent = voice.label;
   voiceConfidence.textContent = `${(voice.confidence * 100).toFixed(1)}%`;
   voiceFileName.textContent = voice.filename || "Recorded clip";
@@ -260,12 +365,16 @@ function updateVoiceView(voice) {
   if (voice.normalized_waveform_wav_base64) {
     setProcessedVoicePlayback(voice.normalized_waveform_wav_base64);
   }
+  renderReviewState("voice", voice);
 }
 
 async function pollState() {
   try {
     const response = await fetch("/api/state");
     const state = await response.json();
+    if (state.session_dir) {
+      sessionDir.textContent = state.session_dir;
+    }
     if (state.gesture && state.gesture.updated_at !== lastGestureUpdate) {
       lastGestureUpdate = state.gesture.updated_at;
       updateGestureView(state.gesture);
@@ -358,7 +467,41 @@ recordToggle.addEventListener("click", async () => {
 viewBothButton.addEventListener("click", () => setDashboardView("both"));
 viewGestureButton.addEventListener("click", () => setDashboardView("gesture"));
 viewVoiceButton.addEventListener("click", () => setDashboardView("voice"));
+gestureMarkCorrect.addEventListener("click", async () => {
+  try {
+    await submitReview("gesture", true);
+  } catch (error) {
+    gestureReviewStatus.textContent = "Failed to save review";
+    alert(error.message);
+  }
+});
+gestureMarkWrong.addEventListener("click", async () => {
+  try {
+    await submitReview("gesture", false);
+  } catch (error) {
+    gestureReviewStatus.textContent = "Failed to save review";
+    alert(error.message);
+  }
+});
+voiceMarkCorrect.addEventListener("click", async () => {
+  try {
+    await submitReview("voice", true);
+  } catch (error) {
+    voiceReviewStatus.textContent = "Failed to save review";
+    alert(error.message);
+  }
+});
+voiceMarkWrong.addEventListener("click", async () => {
+  try {
+    await submitReview("voice", false);
+  } catch (error) {
+    voiceReviewStatus.textContent = "Failed to save review";
+    alert(error.message);
+  }
+});
 
 setDashboardView("both");
+renderReviewState("gesture", null);
+renderReviewState("voice", null);
 pollState();
 setInterval(pollState, 1200);

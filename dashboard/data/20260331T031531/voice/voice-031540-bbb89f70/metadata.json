@@ -1,0 +1,93 @@
+{
+  "sample_id": "voice-031540-bbb89f70",
+  "kind": "voice",
+  "created_at": 1774898140.562521,
+  "source": "voice-web",
+  "filename": "recorded-clip.webm",
+  "content_type": "audio/webm;codecs=opus",
+  "prediction": {
+    "label": "Pikachu",
+    "confidence": 0.680462121963501,
+    "probabilities": [
+      {
+        "label": "Bulbasaur",
+        "index": 0,
+        "probability": 0.01739574782550335
+      },
+      {
+        "label": "Charizard",
+        "index": 1,
+        "probability": 0.3021421432495117
+      },
+      {
+        "label": "Pikachu",
+        "index": 2,
+        "probability": 0.680462121963501
+      }
+    ]
+  },
+  "sample_rate": 16000,
+  "request_meta": {
+    "filename": "recorded-clip.webm",
+    "content_type": "audio/webm;codecs=opus",
+    "source": "voice-web"
+  },
+  "debug": {
+    "raw_samples": 48000,
+    "trimmed_samples": 12800,
+    "normalized_samples": 12800,
+    "emphasized_samples": 12800,
+    "raw": {
+      "min": -1.0171326398849487,
+      "max": 0.973541796207428,
+      "mean": -5.093887693874422e-07,
+      "std": 0.0919998437166214,
+      "rms": 0.09199984792991739,
+      "peak": 1.0171326398849487
+    },
+    "trimmed": {
+      "min": -1.0171326398849487,
+      "max": 0.973541796207428,
+      "mean": -5.260370471660281e-06,
+      "std": 0.17810961604118347,
+      "rms": 0.1781096186624577,
+      "peak": 1.0171326398849487
+    },
+    "normalized": {
+      "min": -0.7189359664916992,
+      "max": 0.6881247758865356,
+      "mean": -3.7184963730396703e-06,
+      "std": 0.1258925348520279,
+      "rms": 0.1258925361313024,
+      "peak": 0.7189359664916992
+    },
+    "emphasized": {
+      "min": -0.7189359664916992,
+      "max": 0.6881247758865356,
+      "mean": -3.7184963730396703e-06,
+      "std": 0.1258925348520279,
+      "rms": 0.1258925361313024,
+      "peak": 0.7189359664916992
+    },
+    "power_shape": [
+      257,
+      81
+    ],
+    "mel_shape": [
+      40,
+      81
+    ],
+    "mfcc_shape": [
+      40,
+      50
+    ],
+    "pre_emphasis": 0.0
+  },
+  "review": {
+    "status": "reviewed",
+    "is_correct": true,
+    "predicted_label": "Pikachu",
+    "correct_label": "Pikachu",
+    "reviewed_at": 1774898149.211345
+  }
+}
