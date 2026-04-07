@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 100" width="760" height="100">
+  <rect width="760" height="100" rx="14" fill="#fff8e7" stroke="#e8c84a" stroke-width="2"/>
+
+  <!-- Row 1: ML (blue-ish on warm bg) -->
+  <rect x="15" y="12" width="85" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="57" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">PYTORCH</text>
+
+  <rect x="110" y="12" width="55" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="137" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">CNN</text>
+
+  <rect x="175" y="12" width="65" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="207" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">MFCC</text>
+
+  <rect x="250" y="12" width="50" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="275" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">FFT</text>
+
+  <rect x="310" y="12" width="80" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="350" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">NUMPY</text>
+
+  <rect x="400" y="12" width="80" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="440" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">SCIPY</text>
+
+  <rect x="490" y="12" width="100" height="30" rx="15" fill="#ffcb05" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="540" y="32" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#3a2a00" letter-spacing="1">SCIKIT-LRN</text>
+
+  <!-- Row 2: HW (red) + Comms (gold outline) -->
+  <rect x="15" y="55" width="95" height="30" rx="15" fill="#cc3333" stroke="#aa2222" stroke-width="1.5"/>
+  <text x="62" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="white" letter-spacing="1">VITIS HLS</text>
+
+  <rect x="120" y="55" width="88" height="30" rx="15" fill="#cc3333" stroke="#aa2222" stroke-width="1.5"/>
+  <text x="164" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="white" letter-spacing="1">ULTRA96</text>
+
+  <rect x="218" y="55" width="65" height="30" rx="15" fill="#cc3333" stroke="#aa2222" stroke-width="1.5"/>
+  <text x="250" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="white" letter-spacing="1">PYNQ</text>
+
+  <rect x="293" y="55" width="55" height="30" rx="15" fill="#cc3333" stroke="#aa2222" stroke-width="1.5"/>
+  <text x="320" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="white" letter-spacing="1">DMA</text>
+
+  <rect x="358" y="55" width="68" height="30" rx="15" fill="white" stroke="#cc3333" stroke-width="1.5"/>
+  <text x="392" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#cc3333" letter-spacing="1">FLASK</text>
+
+  <rect x="436" y="55" width="65" height="30" rx="15" fill="white" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="468" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#8a6000" letter-spacing="1">MQTT</text>
+
+  <rect x="511" y="55" width="68" height="30" rx="15" fill="white" stroke="#d4a800" stroke-width="1.5"/>
+  <text x="545" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#8a6000" letter-spacing="1">ESP32</text>
+
+  <rect x="589" y="55" width="60" height="30" rx="15" fill="white" stroke="#cc3333" stroke-width="1.5"/>
+  <text x="619" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#cc3333" letter-spacing="1">Q8.8</text>
+
+  <rect x="659" y="55" width="85" height="30" rx="15" fill="white" stroke="#48a868" stroke-width="1.5"/>
+  <text x="701" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="800" fill="#48a868" letter-spacing="1">ARKit</text>
+</svg>

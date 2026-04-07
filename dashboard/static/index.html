@@ -37,6 +37,7 @@
       <button id="view-both" class="toggle-button is-active" type="button">Both</button>
       <button id="view-gesture" class="toggle-button" type="button">Gesture</button>
       <button id="view-voice" class="toggle-button" type="button">Voice</button>
+      <button id="view-cleanup" class="toggle-button" type="button">Cleanup</button>
     </div>
 
     <section id="dashboard-grid" class="grid">
@@ -167,6 +168,29 @@
             <canvas id="voice-mfcc" width="760" height="260"></canvas>
           </div>
         </div>
+      </article>
+
+      <article class="panel" data-panel="cleanup">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Voice Cleanup</p>
+            <h2>Review misclassified test clips</h2>
+          </div>
+          <div id="cleanup-status" class="chip">Idle</div>
+        </div>
+        <div class="cleanup-toolbar">
+          <div>
+            <span class="label">Latest Predictions</span>
+            <strong id="cleanup-summary">Run the voice notebook, then refresh here.</strong>
+          </div>
+          <button id="cleanup-refresh" class="button secondary" type="button">Refresh list</button>
+        </div>
+        <p class="hint">
+          This panel reads <code>voice_test_predictions.csv</code> from the latest voice artefact folder, shows the
+          misclassified clips, and lets you delete bad samples from disk without involving the notebook kernel.
+        </p>
+        <div id="cleanup-meta" class="cleanup-meta"></div>
+        <div id="cleanup-list" class="cleanup-list"></div>
       </article>
     </section>
   </main>

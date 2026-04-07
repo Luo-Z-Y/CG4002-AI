@@ -14,24 +14,24 @@ This workspace currently supports:
 
 ### Gesture
 
-- Training notebook: [train_gesture_cnn.ipynb](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/notebooks/train_gesture_cnn.ipynb)
-- Active retraining dataset override: [data/gesture/20260328peer](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/gesture/20260328peer)
-- Dataset content: peer-only raw gyro/acc gesture packets, `50` measurements per class, `300` measurements total
+- Training notebook: [train_gesture_cnn.ipynb](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/notebooks/train_gesture_cnn.ipynb)
+- Current dated dataset folder: [data/gesture/20260406](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/gesture/20260406)
+- Dataset content: merged raw gyro/acc gesture packets, `100` measurements per class, `600` measurements total
 - Preprocessing contract:
   - raw count band: `15` to `300`
   - motion trim by gyro magnitude threshold `5.0`
   - trimmed count band: `40` to `300`
   - baseline removal from first `5` frames
   - FFT resample to `60 x 6`
-- Runtime normalisation strategy: fused into exported gesture `conv1`
+- Runtime normalisation strategy: software z-score using `gesture_mean.npy` and `gesture_std.npy`
 
 ### Voice
 
-- Training notebook: [train_voice_cnn.ipynb](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/notebooks/train_voice_cnn.ipynb)
+- Training notebook: [train_voice_cnn.ipynb](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/notebooks/train_voice_cnn.ipynb)
 - Active combined sources:
-  - [data/audio/20260313](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/20260313)
-  - [data/audio/20260321](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/20260321)
-- Artefact folder: [data/audio/combined](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined)
+  - [data/audio/20260313](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260313)
+  - [data/audio/20260321](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260321)
+- Current runtime normalisation files: [ultra96/deployment/voice_mean.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy) and [ultra96/deployment/voice_std.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
 - Test policy: hold out `5` speakers from `20260321`
 - Preprocessing contract:
   - decode raw audio to mono `16 kHz`
@@ -74,11 +74,11 @@ CG4002-AI/
 The recommended way to run anything in this workspace is to use the project venv directly:
 
 ```bash
-cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI
+cd /Users/luozhiyang/Projects/CG4002-Code/CG4002-AI
 ./.venv/bin/python --version
 ```
 
-If shell activation is unreliable on your machine, prefer:
+If shell activation is unreliable on your machine, prefer the project venv directly:
 
 ```bash
 ./.venv/bin/python <script.py>
@@ -91,17 +91,18 @@ If shell activation is unreliable on your machine, prefer:
 Run the notebook top to bottom:
 
 ```bash
-cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/notebooks
+cd /Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/notebooks
 jupyter notebook
 ```
 
-Then open [train_gesture_cnn.ipynb](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/notebooks/train_gesture_cnn.ipynb).
+Then open [train_gesture_cnn.ipynb](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/notebooks/train_gesture_cnn.ipynb).
 
 Important notes:
 
-- The notebook is currently pinned to [data/gesture/20260328peer](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/gesture/20260328peer) via `GESTURE_DIR_OVERRIDE`.
-- This is a peer-only dataset with balanced classes.
-- Gesture export still uses `fuse_input_norm=True`.
+- The notebook now auto-selects the latest dated gesture folder when `GESTURE_DIR_OVERRIDE = None`.
+- The current latest folder is [data/gesture/20260406](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/gesture/20260406).
+- `imudata.csv` is auto-built from flat txt logs if needed.
+- Gesture export uses `fuse_input_norm=False`.
 
 Main gesture artefacts produced under the selected gesture folder:
 
@@ -114,17 +115,17 @@ Main gesture artefacts produced under the selected gesture folder:
 
 ### Voice Retraining
 
-Run [train_voice_cnn.ipynb](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/notebooks/train_voice_cnn.ipynb) top to bottom.
+Run [train_voice_cnn.ipynb](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/notebooks/train_voice_cnn.ipynb) top to bottom.
 
 Important notes:
 
-- The notebook uses the shared deployment-aligned pipeline in [voice_feature_pipeline.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/tools/voice_feature_pipeline.py).
+- The notebook uses the shared deployment-aligned pipeline in [voice_feature_pipeline.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/tools/voice_feature_pipeline.py).
 - `USE_CLEANED_AUDIO` should stay `False` for deployment parity.
 - The active output label is `combined`.
 - The current split holds out `5` speakers from `20260321` for test.
 - Voice export uses `fuse_input_norm=False`.
 
-Main voice artefacts produced in [data/audio/combined](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined):
+Main voice artefacts are expected under the selected audio artefact folder:
 
 - `voice_manifest.csv`
 - `voice_features.npy`
@@ -143,22 +144,27 @@ After fully rerunning the notebooks, the usual files to copy to your Windows HLS
 
 ### Gesture
 
-- [data/gesture/20260328peer/gesture_cnn_weights.h](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/gesture/20260328peer/gesture_cnn_weights.h)
-- [hls/gesture/gesture_cnn.cpp](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/hls/gesture/gesture_cnn.cpp)
-- [hls/gesture/gesture_cnn.h](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/hls/gesture/gesture_cnn.h)
-- [hls/gesture/gesture_typedefs.h](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/hls/gesture/gesture_typedefs.h)
+- [data/gesture/20260406/gesture_cnn_weights.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/gesture/20260406/gesture_cnn_weights.h)
+- [hls/gesture/gesture_cnn.cpp](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/gesture/gesture_cnn.cpp)
+- [hls/gesture/gesture_cnn.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/gesture/gesture_cnn.h)
+- [hls/gesture/gesture_typedefs.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/gesture/gesture_typedefs.h)
 
 ### Voice
 
-- [data/audio/combined/voice_cnn_weights.h](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/data/audio/combined/voice_cnn_weights.h)
-- [hls/voice/voice_cnn.cpp](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.cpp)
-- [hls/voice/voice_cnn.h](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.h)
-- [hls/voice/voice_typedefs.h](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/hls/voice/voice_typedefs.h)
+- [hls/voice/voice_cnn_weights.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn_weights.h)
+- [hls/voice/voice_cnn.cpp](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.cpp)
+- [hls/voice/voice_cnn.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.h)
+- [hls/voice/voice_typedefs.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_typedefs.h)
 
 For voice deployment, the software path also needs:
 
-- [ultra96/deployment/voice_mean.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy)
-- [ultra96/deployment/voice_std.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
+- [ultra96/deployment/voice_mean.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy)
+- [ultra96/deployment/voice_std.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
+
+For gesture deployment, the software path also needs:
+
+- [ultra96/deployment/gesture_mean.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/gesture_mean.npy)
+- [ultra96/deployment/gesture_std.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/gesture_std.npy)
 
 ## Local Dashboard
 
@@ -167,18 +173,20 @@ The local dashboard is useful for testing models before deploying to Ultra96.
 Start it with:
 
 ```bash
-cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI
+cd /Users/luozhiyang/Projects/CG4002-Code/CG4002-AI
 ./.venv/bin/python dashboard/server.py --host 127.0.0.1 --port 8000
 ```
 
 Optional explicit artefact paths:
 
 ```bash
-./.venv/bin/python dashboard/server.py \
+  ./.venv/bin/python dashboard/server.py \
   --host 127.0.0.1 \
   --port 8000 \
-  --gesture-weights data/gesture/20260328peer/gesture_cnn_weights.h \
-  --voice-weights data/audio/combined/voice_cnn_weights.h \
+  --gesture-weights data/gesture/20260406/gesture_cnn_weights.h \
+  --gesture-mean ultra96/deployment/gesture_mean.npy \
+  --gesture-std ultra96/deployment/gesture_std.npy \
+  --voice-weights hls/voice/voice_cnn_weights.h \
   --voice-mean ultra96/deployment/voice_mean.npy \
   --voice-std ultra96/deployment/voice_std.npy
 ```
@@ -198,12 +206,12 @@ The dashboard supports:
 
 Use the hardware bridge script in the hardware workspace:
 
-- [gesture_live_test.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-HW/gesture_live_test.py)
+- [gesture_live_test.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-HW/gesture_live_test.py)
 
 Example:
 
 ```bash
-cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-HW
+cd /Users/luozhiyang/Projects/CG4002-Code/CG4002-HW
 ./.venv/bin/python gesture_live_test.py \
   --port /dev/cu.usbserial-1410 \
   --baud 115200 \
@@ -216,7 +224,8 @@ cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore
 
 - Training preprocessing and deployment preprocessing are aligned.
 - Dashboard inference uses the same preprocessing contract.
-- Gesture normalisation is fused into exported weights.
+- Dashboard and Ultra96 both apply `gesture_mean/std` in software.
+- Gesture export is intentionally non-fused.
 - Ultra96 and dashboard both expect the same class order:
   - `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
 
@@ -232,8 +241,8 @@ cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore
 
 See:
 
-- [ultra96/README.md](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/README.md)
-- [ultra96/deployment/README.md](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/README.md)
+- [ultra96/README.md](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/README.md)
+- [ultra96/deployment/README.md](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/README.md)
 
 The deployment README documents:
 

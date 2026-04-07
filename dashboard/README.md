@@ -144,7 +144,8 @@ You only need `--voice-mean` and `--voice-std` when you want to override the def
 ### Gesture
 
 - dashboard gesture preprocessing matches deployment preprocessing
-- gesture input normalisation is fused into the exported gesture weights
+- dashboard applies software `gesture_mean.npy` and `gesture_std.npy`
+- gesture weights should therefore be exported non-fused
 
 ### Voice
 

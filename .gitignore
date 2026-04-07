@@ -1,6 +1,7 @@
 .venv
 data/audio/
 data/gesture/
+dashboard/data
 
 .DS_Store
 

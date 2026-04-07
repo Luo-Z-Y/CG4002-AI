@@ -60,6 +60,8 @@ class VoicePreprocessor:
         n_mfcc: int = 40,
         target_frames: int = 50,
         pre_emphasis: float = 0.0,
+        cepstral_mean_norm: bool = False,
+        cepstral_var_norm: bool = False,
         center: bool = True,
         pad_mode: str = "reflect",
         trim_threshold_db: float = -28.0,
@@ -69,6 +71,13 @@ class VoicePreprocessor:
         trim_hop_ms: float = 10.0,
         target_rms_dbfs: float = -18.0,
         peak_limit_dbfs: float = -1.0,
+        pitch_focus_half_window_s: float = 1.0,
+        pitch_focus_frame_ms: float = 40.0,
+        pitch_focus_hop_ms: float = 10.0,
+        pitch_focus_min_hz: float = 120.0,
+        pitch_focus_max_hz: float = 1200.0,
+        pitch_focus_energy_threshold_db: float = -18.0,
+        pitch_focus_min_correlation: float = 0.35,
         eps: float = 1e-8,
     ) -> None:
         self.sample_rate = sample_rate
@@ -79,6 +88,8 @@ class VoicePreprocessor:
         self.n_mfcc = n_mfcc
         self.target_frames = target_frames
         self.pre_emphasis = pre_emphasis
+        self.cepstral_mean_norm = cepstral_mean_norm
+        self.cepstral_var_norm = cepstral_var_norm
         self.center = center
         self.pad_mode = pad_mode
         self.trim_threshold_db = trim_threshold_db
@@ -88,6 +99,13 @@ class VoicePreprocessor:
         self.trim_hop_ms = trim_hop_ms
         self.target_rms_dbfs = target_rms_dbfs
         self.peak_limit_dbfs = peak_limit_dbfs
+        self.pitch_focus_half_window_s = pitch_focus_half_window_s
+        self.pitch_focus_frame_ms = pitch_focus_frame_ms
+        self.pitch_focus_hop_ms = pitch_focus_hop_ms
+        self.pitch_focus_min_hz = pitch_focus_min_hz
+        self.pitch_focus_max_hz = pitch_focus_max_hz
+        self.pitch_focus_energy_threshold_db = pitch_focus_energy_threshold_db
+        self.pitch_focus_min_correlation = pitch_focus_min_correlation
         self.eps = eps
 
         self.window = np.hanning(self.win_length).astype(np.float32)
@@ -249,14 +267,112 @@ class VoicePreprocessor:
 
         return np.clip(waveform * gain, -1.0, 1.0).astype(np.float32)
 
+    def _focus_active_region(self, waveform: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
+        if waveform.size == 0:
+            return waveform, {
+                "applied": 0.0,
+                "start_sample": 0.0,
+                "end_sample": 0.0,
+                "centre_sample": 0.0,
+                "focus_mode": 0.0,
+                "frame_rms": 0.0,
+                "window_samples": 0.0,
+            }
+
+        half_window = max(1, int(round(self.sample_rate * self.pitch_focus_half_window_s)))
+        target_window = max(1, half_window * 2)
+
+        frame_len = max(1, int(round(self.sample_rate * self.pitch_focus_frame_ms / 1000.0)))
+        hop_len = max(1, int(round(self.sample_rate * self.pitch_focus_hop_ms / 1000.0)))
+        if waveform.size < frame_len:
+            padded = np.pad(waveform, (0, frame_len - waveform.size), mode="constant")
+        else:
+            padded = waveform
+
+        peak_rms = float(np.sqrt(np.mean(np.square(waveform), dtype=np.float64)))
+        energy_threshold = max(
+            peak_rms * (10.0 ** (self.pitch_focus_energy_threshold_db / 20.0)),
+            10.0 ** (self.min_floor_dbfs / 20.0),
+        )
+
+        frame_centres: list[int] = []
+        frame_weights: list[float] = []
+        strongest_frame_rms = 0.0
+        last_start = max(0, padded.size - frame_len)
+        for start in range(0, last_start + 1, hop_len):
+            frame = padded[start : start + frame_len]
+            frame_rms = float(np.sqrt(np.mean(np.square(frame), dtype=np.float64)))
+            strongest_frame_rms = max(strongest_frame_rms, frame_rms)
+            weight = max(0.0, frame_rms - energy_threshold)
+            if weight <= 0.0:
+                continue
+            frame_centres.append(start + frame_len // 2)
+            frame_weights.append(weight)
+
+        if not frame_centres:
+            centre = waveform.size // 2
+        else:
+            centres_np = np.asarray(frame_centres, dtype=np.float64)
+            weights_np = np.asarray(frame_weights, dtype=np.float64)
+            centre = int(np.round(np.sum(centres_np * weights_np) / max(np.sum(weights_np), self.eps)))
+
+        if waveform.size <= target_window:
+            return waveform, {
+                "applied": 0.0,
+                "start_sample": 0.0,
+                "end_sample": float(waveform.size),
+                "centre_sample": float(centre),
+                "focus_mode": 0.0,
+                "frame_rms": strongest_frame_rms,
+                "window_samples": float(waveform.size),
+            }
+
+        desired_start = centre - half_window
+        desired_end = desired_start + target_window
+
+        src_start = max(0, desired_start)
+        src_end = min(waveform.size, desired_end)
+        dst_start = max(0, -desired_start)
+        dst_end = dst_start + max(0, src_end - src_start)
+
+        focused = np.zeros(target_window, dtype=np.float32)
+        if src_end > src_start:
+            focused[dst_start:dst_end] = waveform[src_start:src_end]
+        return focused, {
+            "applied": 1.0,
+            "start_sample": float(desired_start),
+            "end_sample": float(desired_end),
+            "centre_sample": float(centre),
+            "focus_mode": 1.0,
+            "frame_rms": strongest_frame_rms,
+            "window_samples": float(focused.size),
+            "source_start_sample": float(src_start),
+            "source_end_sample": float(src_end),
+            "dest_start_sample": float(dst_start),
+            "dest_end_sample": float(dst_end),
+        }
+
     def _pad_or_trim_time(self, feat: np.ndarray) -> np.ndarray:
         # The Ultra96 voice model expects a fixed number of time frames: 50.
         frame_count = feat.shape[1]
         if frame_count == self.target_frames:
             return feat
         if frame_count > self.target_frames:
-            return feat[:, : self.target_frames]
+            start = max(0, (frame_count - self.target_frames) // 2)
+            end = start + self.target_frames
+            return feat[:, start:end]
         return np.pad(feat, ((0, 0), (0, self.target_frames - frame_count)), mode="constant")
+
+    def _normalize_mfcc(self, feat: np.ndarray) -> np.ndarray:
+        # Per-clip cepstral mean normalisation helps suppress speaker/channel bias
+        # before the dataset-level z-score is applied in software.
+        out = feat.astype(np.float32, copy=True)
+        if self.cepstral_mean_norm:
+            out -= out.mean(axis=1, keepdims=True)
+        if self.cepstral_var_norm:
+            std = np.maximum(out.std(axis=1, keepdims=True), self.eps)
+            out /= std
+        return out.astype(np.float32)
 
     def process_waveform(self, waveform: np.ndarray, sample_rate: int) -> np.ndarray:
         """Convert a mono waveform into the fixed MFCC matrix sent to Ultra96."""
@@ -265,39 +381,48 @@ class VoicePreprocessor:
         if sample_rate != self.sample_rate:
             raise ValueError(f"Expected sample_rate={self.sample_rate}, got {sample_rate}")
 
-        # Live path mirrors the training path:
+        # Live path mirrors the training path up to raw MFCC extraction:
         # trim silence -> loudness normalize -> MFCC extraction with notebook-aligned settings.
-        # Dataset-level normalization is fused into conv1 weights during export instead of per-clip CMVN.
+        # Dataset-level z-score is applied later in software using voice_mean.npy / voice_std.npy.
         raw_waveform = waveform
         trimmed_waveform = self._trim_silence(raw_waveform)
         normalized_waveform = self._normalize_loudness(trimmed_waveform)
+        focused_waveform, active_focus = self._focus_active_region(normalized_waveform)
         if abs(self.pre_emphasis) > self.eps:
-            emphasized_waveform = self._pre_emphasize(normalized_waveform)
+            emphasized_waveform = self._pre_emphasize(focused_waveform)
         else:
-            emphasized_waveform = normalized_waveform
+            emphasized_waveform = focused_waveform
         power_spec = self._stft_power(emphasized_waveform)
         mel_spec = np.matmul(self.mel_fb, power_spec)
         log_mel = np.log(mel_spec + self.eps)
         mfcc = np.matmul(self.dct_mat, log_mel).astype(np.float32)
         mfcc = self._pad_or_trim_time(mfcc)
+        mfcc = self._normalize_mfcc(mfcc)
         self.last_debug = {
             "raw_samples": int(raw_waveform.size),
             "trimmed_samples": int(trimmed_waveform.size),
             "normalized_samples": int(normalized_waveform.size),
+            "focused_samples": int(focused_waveform.size),
             "emphasized_samples": int(emphasized_waveform.size),
             "raw": self._signal_stats(raw_waveform),
             "trimmed": self._signal_stats(trimmed_waveform),
             "normalized": self._signal_stats(normalized_waveform),
+            "focused": self._signal_stats(focused_waveform),
             "emphasized": self._signal_stats(emphasized_waveform),
             "power_shape": tuple(int(dim) for dim in power_spec.shape),
             "mel_shape": tuple(int(dim) for dim in mel_spec.shape),
             "mfcc_shape": tuple(int(dim) for dim in mfcc.shape),
             "pre_emphasis": float(self.pre_emphasis),
+            "cepstral_mean_norm": float(self.cepstral_mean_norm),
+            "cepstral_var_norm": float(self.cepstral_var_norm),
+            "active_focus": active_focus,
+            "pitch_focus": active_focus,  # Legacy key kept so dashboard debug views do not break.
         }
         self.last_capture = {
             "raw_waveform": raw_waveform.copy(),
             "trimmed_waveform": trimmed_waveform.copy(),
             "normalized_waveform": normalized_waveform.copy(),
+            "focused_waveform": focused_waveform.copy(),
             "emphasized_waveform": emphasized_waveform.copy(),
             "mfcc": mfcc.copy(),
         }

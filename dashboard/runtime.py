@@ -21,15 +21,26 @@ import torch.nn as nn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOYMENT_DIR = REPO_ROOT / "ultra96" / "deployment"
-if str(DEPLOYMENT_DIR) not in sys.path:
-    sys.path.insert(0, str(DEPLOYMENT_DIR))
+TOOLS_DIR = REPO_ROOT / "tools"
+for search_path in [DEPLOYMENT_DIR, TOOLS_DIR]:
+    if str(search_path) not in sys.path:
+        sys.path.insert(0, str(search_path))
 
 from audio import VoicePreprocessor, load_feature_norm_stats, normalize_feature_matrix  # type: ignore  # noqa: E402
 from imu import ImuPreprocessor, load_feature_norm_stats as load_gesture_norm_stats, normalize_window  # type: ignore  # noqa: E402
+from voice_model_metadata import (  # type: ignore  # noqa: E402
+    CANONICAL_VOICE_LABELS,
+    VOICE_LABELS_FILENAME,
+    VOICE_PREPROCESS_CONFIG_FILENAME,
+    load_voice_labels,
+    load_voice_preprocess_config,
+)
+from voice_cnn_training import build_voice_model  # type: ignore  # noqa: E402
 
 
 GESTURE_LABELS = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"]
-VOICE_LABELS = ["Bulbasaur", "Charizard", "Pikachu"]
+VOICE_LABELS = list(CANONICAL_VOICE_LABELS)
+VOICE_DASHBOARD_CHECKPOINT_FILENAME = "voice_dashboard_model.pt"
 
 _ARRAY_RE = re.compile(
     r"static const data_t (?P<name>\w+)\[(?P<size>\d+)\] = \{(?P<body>.*?)\};",
@@ -59,7 +70,7 @@ class GestureCNN(nn.Module):
 
 
 class VoiceCNN(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, num_classes: int) -> None:
         super().__init__()
         self.conv1 = nn.Conv1d(40, 16, kernel_size=3, padding=1)
         self.relu1 = nn.ReLU()
@@ -69,7 +80,7 @@ class VoiceCNN(nn.Module):
         self.relu2 = nn.ReLU()
         self.pool2 = nn.AdaptiveAvgPool1d(1)
         self.drop2 = nn.Dropout(0.0)
-        self.fc = nn.Linear(32, len(VOICE_LABELS))
+        self.fc = nn.Linear(32, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.drop1(self.pool1(self.relu1(self.conv1(x))))
@@ -113,19 +124,59 @@ def _load_gesture_model(header_path: Path) -> GestureCNN:
     return model
 
 
-def _load_voice_model(header_path: Path) -> VoiceCNN:
+def _resolve_voice_labels(class_count: int, artifact_dir: Path | None = None) -> list[str]:
+    if artifact_dir is not None:
+        labels = load_voice_labels(artifact_dir / VOICE_LABELS_FILENAME)
+        if labels is not None and len(labels) == class_count:
+            return labels
+    if class_count <= len(VOICE_LABELS):
+        return VOICE_LABELS[:class_count]
+    return [f"Voice {idx}" for idx in range(class_count)]
+
+
+def _load_voice_model(header_path: Path) -> tuple[VoiceCNN, list[str]]:
     arrays = _read_weight_arrays(header_path)
-    model = VoiceCNN()
+    class_count = int(arrays["fc_b"].size)
+    labels = _resolve_voice_labels(class_count, header_path.parent)
+    model = VoiceCNN(num_classes=class_count)
     state = model.state_dict()
     state["conv1.weight"] = torch.from_numpy(arrays["conv1_w"].reshape(16, 40, 3))
     state["conv1.bias"] = torch.from_numpy(arrays["conv1_b"])
     state["conv2.weight"] = torch.from_numpy(arrays["conv2_w"].reshape(32, 16, 3))
     state["conv2.bias"] = torch.from_numpy(arrays["conv2_b"])
-    state["fc.weight"] = torch.from_numpy(arrays["fc_w"].reshape(len(VOICE_LABELS), 32))
+    state["fc.weight"] = torch.from_numpy(arrays["fc_w"].reshape(class_count, 32))
     state["fc.bias"] = torch.from_numpy(arrays["fc_b"])
     model.load_state_dict(state)
     model.eval()
-    return model
+    return model, labels
+
+
+def _load_voice_checkpoint_model(checkpoint_path: Path) -> tuple[nn.Module, list[str]]:
+    payload = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise ValueError(f"{checkpoint_path}: expected checkpoint dict")
+    variant = str(payload.get("variant", "deployed"))
+    labels = payload.get("labels")
+    if not isinstance(labels, list) or not labels:
+        raise ValueError(f"{checkpoint_path}: labels missing from checkpoint")
+    num_classes = int(payload.get("num_classes", len(labels)))
+    dropout_p = float(payload.get("dropout_p", 0.0))
+    bn_momentum = float(payload.get("bn_momentum", 0.05))
+    bn_eps = float(payload.get("bn_eps", 1e-3))
+    state_dict = payload.get("state_dict")
+    if not isinstance(state_dict, dict):
+        raise ValueError(f"{checkpoint_path}: state_dict missing from checkpoint")
+
+    model = build_voice_model(
+        num_classes=num_classes,
+        variant=variant,
+        dropout_p=dropout_p,
+        bn_momentum=bn_momentum,
+        bn_eps=bn_eps,
+    )
+    model.load_state_dict(state_dict)
+    model.eval()
+    return model, [str(label) for label in labels]
 
 
 def _softmax_result(logits: torch.Tensor, labels: list[str]) -> dict[str, Any]:
@@ -252,6 +303,7 @@ class LocalAiRuntime:
         self,
         gesture_weights: str | Path | None = None,
         voice_weights: str | Path | None = None,
+        voice_checkpoint: str | Path | None = None,
         gesture_mean: str | Path | None = None,
         gesture_std: str | Path | None = None,
         voice_mean: str | Path | None = None,
@@ -261,14 +313,22 @@ class LocalAiRuntime:
         voice_header = Path(voice_weights) if voice_weights is not None else REPO_ROOT / "hls" / "voice" / "voice_cnn_weights.h"
         self.gesture_weights_path = gesture_header.resolve()
         self.voice_weights_path = voice_header.resolve()
+        self.voice_checkpoint_path = self._resolve_voice_checkpoint_path(voice_checkpoint)
         self.gesture_mean_path, self.gesture_std_path = self._resolve_gesture_norm_paths(gesture_mean, gesture_std)
         self.gesture_mean, self.gesture_std = load_gesture_norm_stats(self.gesture_mean_path, self.gesture_std_path)
         self.voice_mean_path, self.voice_std_path = self._resolve_voice_norm_paths(voice_mean, voice_std)
         self.voice_mean, self.voice_std = load_feature_norm_stats(self.voice_mean_path, self.voice_std_path)
         self.gesture_model = _load_gesture_model(self.gesture_weights_path)
-        self.voice_model = _load_voice_model(self.voice_weights_path)
+        self.gesture_labels = list(GESTURE_LABELS)
+        if self.voice_checkpoint_path is not None:
+            self.voice_model, self.voice_labels = _load_voice_checkpoint_model(self.voice_checkpoint_path)
+            self.voice_model_source = "checkpoint"
+        else:
+            self.voice_model, self.voice_labels = _load_voice_model(self.voice_weights_path)
+            self.voice_model_source = "hls_header"
         self.gesture_preprocessor = ImuPreprocessor()
-        self.voice_preprocessor = VoicePreprocessor(sample_rate=16000)
+        self.voice_preprocess_config = self._resolve_voice_preprocess_config()
+        self.voice_preprocessor = VoicePreprocessor(sample_rate=16000, **self.voice_preprocess_config)
 
     def _resolve_gesture_norm_paths(
         self,
@@ -302,14 +362,67 @@ class LocalAiRuntime:
         if voice_mean is not None and voice_std is not None:
             return Path(voice_mean).resolve(), Path(voice_std).resolve()
 
-        candidates = [
+        candidates = []
+        if self.voice_checkpoint_path is not None:
+            candidates.append(
+                (
+                    self.voice_checkpoint_path.parent / "voice_mean.npy",
+                    self.voice_checkpoint_path.parent / "voice_std.npy",
+                )
+            )
+        candidates.extend([
             (self.voice_weights_path.parent / "voice_mean.npy", self.voice_weights_path.parent / "voice_std.npy"),
+            (REPO_ROOT / "ultra96" / "deployment" / "voice_mean.npy", REPO_ROOT / "ultra96" / "deployment" / "voice_std.npy"),
             (REPO_ROOT / "data" / "audio" / "combined" / "voice_mean.npy", REPO_ROOT / "data" / "audio" / "combined" / "voice_std.npy"),
-        ]
+            (REPO_ROOT / "data" / "audio" / "20260321" / "voice_mean.npy", REPO_ROOT / "data" / "audio" / "20260321" / "voice_std.npy"),
+        ])
         for mean_path, std_path in candidates:
             if mean_path.exists() and std_path.exists():
                 return mean_path.resolve(), std_path.resolve()
         raise FileNotFoundError("Could not locate voice_mean.npy and voice_std.npy for dashboard voice normalization")
+
+    def _resolve_voice_checkpoint_path(self, voice_checkpoint: str | Path | None) -> Path | None:
+        if voice_checkpoint is not None:
+            path = Path(voice_checkpoint).resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"Voice checkpoint not found: {path}")
+            return path
+
+        candidates: list[Path] = []
+        candidates.append(REPO_ROOT / "ultra96" / "deployment" / VOICE_DASHBOARD_CHECKPOINT_FILENAME)
+        candidates.extend((REPO_ROOT / "data" / "audio").rglob(VOICE_DASHBOARD_CHECKPOINT_FILENAME))
+
+        existing = []
+        seen: set[Path] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if resolved.exists():
+                existing.append(resolved)
+        if not existing:
+            return None
+        return max(existing, key=lambda path: path.stat().st_mtime)
+
+    def _resolve_voice_preprocess_config(self) -> dict[str, Any]:
+        candidates = []
+        if self.voice_checkpoint_path is not None:
+            candidates.append(self.voice_checkpoint_path.parent / VOICE_PREPROCESS_CONFIG_FILENAME)
+        candidates.extend([
+            self.voice_weights_path.parent / VOICE_PREPROCESS_CONFIG_FILENAME,
+            self.voice_mean_path.parent / VOICE_PREPROCESS_CONFIG_FILENAME,
+        ])
+        seen: set[Path] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            config = load_voice_preprocess_config(resolved)
+            if config is not None:
+                return config
+        return {}
 
     def predict_gesture(self, samples: list[dict[str, float]] | list[list[float]]) -> dict[str, Any]:
         normalized_samples: list[dict[str, float]] | list[list[float]] = samples
@@ -357,16 +470,19 @@ class LocalAiRuntime:
         mfcc = normalize_feature_matrix(mfcc_raw, self.voice_mean, self.voice_std)
         tensor = torch.tensor(mfcc[None, :, :], dtype=torch.float32)
         logits = self.voice_model(tensor)
-        result = _softmax_result(logits, VOICE_LABELS)
+        result = _softmax_result(logits, self.voice_labels)
         capture = self.voice_preprocessor.last_capture or {}
-        normalized_waveform = np.asarray(capture.get("normalized_waveform", waveform), dtype=np.float32)
+        focused_waveform = np.asarray(
+            capture.get("focused_waveform", capture.get("normalized_waveform", waveform)),
+            dtype=np.float32,
+        )
         result.update(
             {
                 "raw_waveform": _downsample_1d(capture.get("raw_waveform", waveform)),
-                "normalized_waveform": _downsample_1d(normalized_waveform),
-                "normalized_waveform_audio": normalized_waveform.astype(float).tolist(),
+                "normalized_waveform": _downsample_1d(focused_waveform),
+                "normalized_waveform_audio": focused_waveform.astype(float).tolist(),
                 "normalized_waveform_wav_base64": base64.b64encode(
-                    _encode_wav_bytes(normalized_waveform, sample_rate=self.voice_preprocessor.sample_rate)
+                    _encode_wav_bytes(focused_waveform, sample_rate=self.voice_preprocessor.sample_rate)
                 ).decode("ascii"),
                 "sample_rate": int(self.voice_preprocessor.sample_rate),
                 "mfcc_raw": np.asarray(capture.get("mfcc", mfcc_raw), dtype=np.float32).astype(float).tolist(),

@@ -39,6 +39,7 @@ def normalize_label(stem: str) -> str | None:
         "vertical": "vertical_chop",
         "circular": "circular_stir",
         "circular_stir": "circular_stir",
+        "cicrular_stir_clockwise": "circular_stir",
         "circular_stir_clockwise": "circular_stir",
         "horizontal": "horizontal_swing",
         "horizontal_swing": "horizontal_swing",

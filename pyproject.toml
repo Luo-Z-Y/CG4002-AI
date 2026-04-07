@@ -13,4 +13,7 @@ dependencies = [
     "seaborn>=0.13",
     "torch>=2.0",
     "ipykernel>=6.0",
+    "requests>=2.33.1",
+    "pydub>=0.25.1",
+    "google-genai>=1.70.0",
 ]

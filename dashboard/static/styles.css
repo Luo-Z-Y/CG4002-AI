@@ -126,7 +126,11 @@ body {
 }
 
 .grid.focus-gesture [data-panel="voice"],
-.grid.focus-voice [data-panel="gesture"] {
+.grid.focus-gesture [data-panel="cleanup"],
+.grid.focus-voice [data-panel="gesture"],
+.grid.focus-voice [data-panel="cleanup"],
+.grid.focus-cleanup [data-panel="gesture"],
+.grid.focus-cleanup [data-panel="voice"] {
   display: none;
 }
 
@@ -380,6 +384,96 @@ canvas {
   margin-top: 8px;
 }
 
+.cleanup-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--line);
+}
+
+.cleanup-toolbar strong {
+  display: inline-block;
+  margin-top: 8px;
+}
+
+.cleanup-meta {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.cleanup-meta-item {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.cleanup-meta-item code,
+.cleanup-path {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.86rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.cleanup-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.cleanup-card,
+.cleanup-empty {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.cleanup-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.cleanup-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.cleanup-subtitle,
+.cleanup-card-meta,
+.cleanup-row-status,
+.cleanup-empty {
+  color: var(--muted);
+}
+
+.cleanup-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 10px;
+  font-size: 0.9rem;
+}
+
+.cleanup-card audio {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.cleanup-row-status {
+  margin-top: 10px;
+  min-height: 1.2rem;
+}
+
 @media (max-width: 1040px) {
   .hero,
   .grid {
@@ -390,8 +484,11 @@ canvas {
     grid-template-columns: 1fr;
   }
 
-  .review-card {
+  .review-card,
+  .cleanup-toolbar,
+  .cleanup-card-top {
     grid-template-columns: 1fr;
+    display: grid;
   }
 
   .review-actions {

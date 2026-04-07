@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 180" width="800" height="180">
+  <rect width="800" height="180" rx="16" fill="#ffcb05"/>
+  <rect width="800" height="180" rx="16" fill="none" stroke="#d4a800" stroke-width="3"/>
+
+  <!-- Top red stripe -->
+  <rect x="0" y="0" width="800" height="6" rx="3" fill="#cc3333"/>
+
+  <!-- Pokeball left -->
+  <circle cx="65" cy="90" r="30" fill="none" stroke="#3a2a00" stroke-width="2" opacity="0.2"/>
+  <line x1="35" y1="90" x2="95" y2="90" stroke="#3a2a00" stroke-width="2" opacity="0.2"/>
+  <circle cx="65" cy="90" r="8" fill="none" stroke="#3a2a00" stroke-width="2" opacity="0.2"/>
+  <circle cx="65" cy="90" r="3" fill="#3a2a00" opacity="0.15"/>
+
+  <!-- Pokeball right -->
+  <circle cx="735" cy="90" r="30" fill="none" stroke="#3a2a00" stroke-width="2" opacity="0.2"/>
+  <line x1="705" y1="90" x2="765" y2="90" stroke="#3a2a00" stroke-width="2" opacity="0.2"/>
+  <circle cx="735" cy="90" r="8" fill="none" stroke="#3a2a00" stroke-width="2" opacity="0.2"/>
+  <circle cx="735" cy="90" r="3" fill="#3a2a00" opacity="0.15"/>
+
+  <text x="400" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#3a2a00" opacity="0.5" letter-spacing="6">REAL-TIME FPGA-ACCELERATED</text>
+
+  <text x="400" y="95" text-anchor="middle" font-family="'Trebuchet MS', Arial, sans-serif" font-size="72" font-weight="900" fill="#3a2a00" letter-spacing="3">CG4002</text>
+
+  <text x="400" y="128" text-anchor="middle" font-family="'Trebuchet MS', Arial, sans-serif" font-size="22" font-weight="800" fill="#cc3333" letter-spacing="6">AI BATTLE SYSTEM</text>
+
+  <text x="400" y="158" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#5a3a00" letter-spacing="2">GESTURE RECOGNITION · VOICE CLASSIFICATION · EDGE INFERENCE</text>
+
+  <!-- Bottom red stripe -->
+  <rect x="0" y="174" width="800" height="6" rx="3" fill="#cc3333"/>
+</svg>

@@ -93,8 +93,8 @@ Important files:
 
 - Input to hardware: preprocessed `60 x 6` IMU window
 - Preprocessing: trim idle frames, baseline removal, FFT resample
+- Normalisation: applied in software using `deployment/gesture_mean.npy` and `deployment/gesture_std.npy`
 - Quantisation: Q8.8 on PS before DMA
-- Normalisation: fused into the exported gesture weights
 
 ### Voice
 
@@ -189,6 +189,6 @@ python3 mqtt-test/self_test.py \
 
 ## Notes
 
+- `deployment/gesture_mean.npy` and `deployment/gesture_std.npy` are required for the current gesture runtime.
 - `deployment/voice_mean.npy` and `deployment/voice_std.npy` are required for the current voice runtime.
-- Gesture does not need separate runtime `mean/std` files because gesture normalisation is fused into the exported weights.
 - The overlay path examples above are written relative to `ultra96/`, not to your Mac workspace root.

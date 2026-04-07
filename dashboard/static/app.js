@@ -28,7 +28,13 @@ const dashboardGrid = document.getElementById("dashboard-grid");
 const viewBothButton = document.getElementById("view-both");
 const viewGestureButton = document.getElementById("view-gesture");
 const viewVoiceButton = document.getElementById("view-voice");
+const viewCleanupButton = document.getElementById("view-cleanup");
 const sessionDir = document.getElementById("session-dir");
+const cleanupStatus = document.getElementById("cleanup-status");
+const cleanupRefresh = document.getElementById("cleanup-refresh");
+const cleanupSummary = document.getElementById("cleanup-summary");
+const cleanupMeta = document.getElementById("cleanup-meta");
+const cleanupList = document.getElementById("cleanup-list");
 
 const gestureRawCanvas = document.getElementById("gesture-raw");
 const gestureProcessedCanvas = document.getElementById("gesture-processed");
@@ -49,6 +55,8 @@ let currentProcessedVoiceUrl = null;
 let currentProcessedVoiceBase64 = null;
 let currentGestureSampleId = null;
 let currentVoiceSampleId = null;
+let gestureLabels = ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"];
+let voiceLabels = ["Bulbasaur", "Charizard", "Greninja", "Lugia", "Mewtwo", "Pikachu"];
 
 function populateLabelOptions(select, labels) {
   select.innerHTML = '<option value="">Correct label</option>';
@@ -61,15 +69,18 @@ function populateLabelOptions(select, labels) {
 }
 
 function setDashboardView(mode) {
-  dashboardGrid.classList.remove("focus-gesture", "focus-voice");
+  dashboardGrid.classList.remove("focus-gesture", "focus-voice", "focus-cleanup");
   viewBothButton.classList.toggle("is-active", mode === "both");
   viewGestureButton.classList.toggle("is-active", mode === "gesture");
   viewVoiceButton.classList.toggle("is-active", mode === "voice");
+  viewCleanupButton.classList.toggle("is-active", mode === "cleanup");
 
   if (mode === "gesture") {
     dashboardGrid.classList.add("focus-gesture");
   } else if (mode === "voice") {
     dashboardGrid.classList.add("focus-voice");
+  } else if (mode === "cleanup") {
+    dashboardGrid.classList.add("focus-cleanup");
   }
 }
 
@@ -132,7 +143,7 @@ function renderReviewState(kind, sample) {
   const correctButton = isGesture ? gestureMarkCorrect : voiceMarkCorrect;
   const labelSelect = isGesture ? gestureCorrectLabel : voiceCorrectLabel;
   const wrongButton = isGesture ? gestureMarkWrong : voiceMarkWrong;
-  const labels = isGesture ? ["Raise", "Shake", "Chop", "Stir", "Swing", "Punch"] : ["Bulbasaur", "Charizard", "Pikachu"];
+  const labels = isGesture ? gestureLabels : voiceLabels;
 
   populateLabelOptions(labelSelect, labels);
 
@@ -368,10 +379,149 @@ function updateVoiceView(voice) {
   renderReviewState("voice", voice);
 }
 
+function renderCleanupMeta(payload) {
+  cleanupMeta.innerHTML = "";
+  if (!payload) {
+    return;
+  }
+  const rows = [
+    ["Artefact dir", payload.artifact_dir || "-"],
+    ["Predictions CSV", payload.predictions_path || "-"],
+    ["Deleted log", payload.deleted_log_path || "-"],
+  ];
+  rows.forEach(([label, value]) => {
+    const item = document.createElement("div");
+    item.className = "cleanup-meta-item";
+    item.innerHTML = `<span class="label">${label}</span><code>${value}</code>`;
+    cleanupMeta.appendChild(item);
+  });
+}
+
+function renderCleanupList(items) {
+  cleanupList.innerHTML = "";
+  if (!items || !items.length) {
+    const empty = document.createElement("div");
+    empty.className = "cleanup-empty";
+    empty.textContent = "No misclassified clips to review in the current predictions file.";
+    cleanupList.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "cleanup-card";
+    const top = document.createElement("div");
+    top.className = "cleanup-card-top";
+    top.innerHTML = `
+      <div>
+        <div class="cleanup-title">manifest_idx=${item.manifest_idx ?? "-"}</div>
+        <div class="cleanup-subtitle">true=${item.true_label ?? "-"} | pred=${item.pred_label ?? "-"} | q88=${item.q88_pred_label ?? "-"}</div>
+      </div>
+      <button class="button cleanup-delete"${item.exists ? "" : " disabled"}>${item.exists ? "Delete clip" : "Missing"}</button>
+    `;
+
+    const meta = document.createElement("div");
+    meta.className = "cleanup-card-meta";
+    meta.innerHTML = `
+      <span>speaker=${item.speaker_id || "-"}</span>
+      <span>utterance=${item.utterance_id || "-"}</span>
+      <span>source=${item.source || "-"}</span>
+      <span>variant=${item.model_variant || "-"}</span>
+      <span>split_seed=${item.split_seed || "-"}</span>
+    `;
+
+    const pathNode = document.createElement("code");
+    pathNode.className = "cleanup-path";
+    pathNode.textContent = item.path;
+
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.preload = "metadata";
+    audio.src = `/api/voice-cleanup/audio?path=${encodeURIComponent(item.path)}`;
+
+    const status = document.createElement("div");
+    status.className = "cleanup-row-status";
+
+    const deleteButton = top.querySelector(".cleanup-delete");
+    deleteButton.addEventListener("click", async () => {
+      if (!item.exists) {
+        return;
+      }
+      const confirmed = window.confirm(`Delete this clip?\n\n${item.path}`);
+      if (!confirmed) {
+        return;
+      }
+      deleteButton.disabled = true;
+      deleteButton.textContent = "Deleting...";
+      status.textContent = "Deleting clip...";
+      try {
+        const response = await fetch("/api/voice-cleanup/delete", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({path: item.path}),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || "Failed to delete clip");
+        }
+        card.remove();
+        status.textContent = "";
+        await fetchCleanupList();
+      } catch (error) {
+        deleteButton.disabled = false;
+        deleteButton.textContent = "Delete clip";
+        status.textContent = error.message;
+      }
+    });
+
+    card.appendChild(top);
+    card.appendChild(meta);
+    card.appendChild(pathNode);
+    card.appendChild(audio);
+    card.appendChild(status);
+    cleanupList.appendChild(card);
+  });
+}
+
+async function fetchCleanupList() {
+  cleanupRefresh.disabled = true;
+  setChip(cleanupStatus, "Loading", "#e6b13a");
+  cleanupSummary.textContent = "Refreshing misclassified clips...";
+  try {
+    const response = await fetch("/api/voice-cleanup/list?limit=60");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Failed to load cleanup list");
+    }
+    renderCleanupMeta(payload);
+    renderCleanupList(payload.items || []);
+    if (payload.error) {
+      cleanupSummary.textContent = payload.error;
+      setChip(cleanupStatus, "Waiting", "#8b5e3c");
+    } else {
+      cleanupSummary.textContent = `${payload.total || 0} misclassified clips found.`;
+      setChip(cleanupStatus, "Ready", "#0f7c82");
+    }
+  } catch (error) {
+    cleanupSummary.textContent = error.message;
+    cleanupMeta.innerHTML = "";
+    cleanupList.innerHTML = "";
+    setChip(cleanupStatus, "Error", "#8b5e3c");
+  } finally {
+    cleanupRefresh.disabled = false;
+  }
+}
+
 async function pollState() {
   try {
     const response = await fetch("/api/state");
     const state = await response.json();
+    if (Array.isArray(state.gesture_labels) && state.gesture_labels.length) {
+      gestureLabels = state.gesture_labels;
+    }
+    if (Array.isArray(state.voice_labels) && state.voice_labels.length) {
+      voiceLabels = state.voice_labels;
+    }
     if (state.session_dir) {
       sessionDir.textContent = state.session_dir;
     }
@@ -467,6 +617,11 @@ recordToggle.addEventListener("click", async () => {
 viewBothButton.addEventListener("click", () => setDashboardView("both"));
 viewGestureButton.addEventListener("click", () => setDashboardView("gesture"));
 viewVoiceButton.addEventListener("click", () => setDashboardView("voice"));
+viewCleanupButton.addEventListener("click", async () => {
+  setDashboardView("cleanup");
+  await fetchCleanupList();
+});
+cleanupRefresh.addEventListener("click", fetchCleanupList);
 gestureMarkCorrect.addEventListener("click", async () => {
   try {
     await submitReview("gesture", true);
@@ -503,5 +658,6 @@ voiceMarkWrong.addEventListener("click", async () => {
 setDashboardView("both");
 renderReviewState("gesture", null);
 renderReviewState("voice", null);
+setChip(cleanupStatus, "Idle", "#8b5e3c");
 pollState();
 setInterval(pollState, 1200);

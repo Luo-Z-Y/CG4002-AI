@@ -1,0 +1,50 @@
+graph LR
+    %% ===== STYLING =====
+    classDef sensor fill:#48a868,stroke:#2d7a4a,color:#fff,font-weight:bold
+    classDef mqtt fill:#cc3333,stroke:#aa2222,color:#fff,font-weight:bold
+    classDef preproc fill:#ffcb05,stroke:#d4a800,color:#3a2a00,font-weight:bold
+    classDef cnn fill:#cc3333,stroke:#aa2222,color:#fff,font-weight:bold
+    classDef fpga fill:#ffcb05,stroke:#b8860b,color:#3a2a00,font-weight:bold,stroke-width:3px
+    classDef output fill:#fff8e7,stroke:#cc3333,color:#3a2a00,font-weight:bold
+    classDef train fill:#fff3cc,stroke:#e8c84a,color:#5a4020
+    classDef dashboard fill:#fff3cc,stroke:#e8c84a,color:#5a4020
+
+    %% ===== INPUT SENSORS =====
+    IMU["🎮 <b>IMU Sensor</b><br/>Gyroscope + Accelerometer<br/><i>6-axis · 100 Hz</i>"]:::sensor
+    MIC["🎤 <b>Microphone</b><br/>Audio Capture<br/><i>WAV · 16 kHz</i>"]:::sensor
+    ESP["📡 <b>ESP32</b><br/>BLE / WiFi Bridge<br/><i>Wireless relay</i>"]:::sensor
+
+    %% ===== MQTT =====
+    MQTT["📨 <b>MQTT Broker</b><br/>Pub / Sub<br/>Topic Routing<br/><i>Amazon EC2</i>"]:::mqtt
+
+    %% ===== PREPROCESSING =====
+    GP["⚙️ <b>Gesture Preproc</b><br/>Idle Trimming<br/>Baseline Removal<br/>FFT Resampling<br/><i>Output: 60×6 tensor</i>"]:::preproc
+    VP["⚙️ <b>Voice Preproc</b><br/>Silence Trimming<br/>Loudness Norm<br/>MFCC Extraction<br/>Mean / Std Norm<br/><i>Output: 40×50 tensor</i>"]:::preproc
+
+    %% ===== CNN =====
+    CNN["🧠 <b>Dual CNN</b><br/>Conv1d → MaxPool<br/>Conv1d → MaxPool<br/>Dense → Dense<br/><b>Q8.8 Fixed-Point</b><br/><i>HLS-synthesised C++</i>"]:::cnn
+
+    %% ===== FPGA =====
+    FPGA["⚡ <b>Ultra96 FPGA</b><br/>PYNQ Overlay<br/>DMA Transfer<br/>HLS IP Cores<br/><b>Real-Time Edge Inference</b><br/><i>dual_cnn.xsa</i>"]:::fpga
+
+    %% ===== OUTPUTS =====
+    GOUT["🥊 <b>Gesture Output</b><br/>Raise · Shake · Chop<br/>Stir · Swing · Punch<br/><i>6 battle moves</i>"]:::output
+    VOUT["🔊 <b>Voice Output</b><br/>Bulbasaur<br/>Charizard<br/>Pikachu<br/><i>3 Pokémon</i>"]:::output
+
+    %% ===== TRAINING (subgraph) =====
+    TRAIN["📚 <b>Training Pipeline</b><br/>PyTorch macOS → Weight Export<br/>→ Vitis HLS Win → .xsa Overlay"]:::train
+    DASH["🖥️ <b>Local Dashboard</b><br/>Flask · Browser UI<br/>Live Inference · MFCC Viz"]:::dashboard
+
+    %% ===== CONNECTIONS =====
+    IMU --> MQTT
+    MIC --> MQTT
+    ESP --> MQTT
+    MQTT --> GP
+    MQTT --> VP
+    GP --> CNN
+    VP --> CNN
+    CNN --> FPGA
+    FPGA --> GOUT
+    FPGA --> VOUT
+    TRAIN -.->|offline deploy| FPGA
+    DASH -.->|debug & test| CNN

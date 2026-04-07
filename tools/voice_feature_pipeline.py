@@ -7,6 +7,7 @@ preprocessor used by the dashboard and Ultra96-side software path.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 import sys
@@ -23,6 +24,17 @@ from ultra96.deployment.audio import VoicePreprocessor, decode_m4a_to_waveform
 
 
 AUDIO_SUFFIXES = {".wav", ".m4a"}
+
+
+def _supported_preprocess_kwargs(preprocess_kwargs: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop unknown kwargs so cached older preprocessors do not break notebooks."""
+
+    if not preprocess_kwargs:
+        return {}
+    signature = inspect.signature(VoicePreprocessor.__init__)
+    supported = set(signature.parameters)
+    supported.discard("self")
+    return {key: value for key, value in preprocess_kwargs.items() if key in supported}
 
 
 def decode_audio_file(
@@ -44,11 +56,15 @@ def feature_from_audio_path(
     audio_path: str | Path,
     sample_rate: int = 16000,
     ffmpeg_path: str = "ffmpeg",
+    preprocess_kwargs: dict[str, Any] | None = None,
     preprocessor: VoicePreprocessor | None = None,
 ) -> np.ndarray:
     """Build one [40, 50] feature matrix using the deployment preprocessor."""
 
-    processor = preprocessor or VoicePreprocessor(sample_rate=sample_rate)
+    processor = preprocessor or VoicePreprocessor(
+        sample_rate=sample_rate,
+        **_supported_preprocess_kwargs(preprocess_kwargs),
+    )
     waveform = decode_audio_file(audio_path, sample_rate=sample_rate, ffmpeg_path=ffmpeg_path)
     feat = processor.process_waveform(waveform, sample_rate)
     return feat.astype(np.float32)
@@ -60,10 +76,12 @@ def build_feature_set_from_manifest(
     label_column: str = "label_id",
     sample_rate: int = 16000,
     ffmpeg_path: str = "ffmpeg",
+    preprocess_kwargs: dict[str, Any] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Convert every manifest row into deployment-aligned MFCC features."""
 
-    processor = VoicePreprocessor(sample_rate=sample_rate)
+    preprocess_kwargs = _supported_preprocess_kwargs(preprocess_kwargs)
+    processor = VoicePreprocessor(sample_rate=sample_rate, **preprocess_kwargs)
     all_X: list[np.ndarray] = []
     all_y: list[int] = []
     for _, row in manifest_df.iterrows():
@@ -72,6 +90,7 @@ def build_feature_set_from_manifest(
                 row[path_column],
                 sample_rate=sample_rate,
                 ffmpeg_path=ffmpeg_path,
+                preprocess_kwargs=preprocess_kwargs,
                 preprocessor=processor,
             )
         )
@@ -82,6 +101,36 @@ def build_feature_set_from_manifest(
 def natural_sort_key(path_like: str | Path) -> list[object]:
     parts = re.split(r"(\d+)", str(path_like).lower())
     return [int(part) if part.isdigit() else part for part in parts]
+
+
+def discover_dashboard_voice_roots(
+    dashboard_data_root: str | Path,
+    required_class_names: set[str] | None = None,
+) -> list[Path]:
+    """Find reviewed dashboard voice folders shaped like `<session>/voice/<label>/*.wav`."""
+
+    root = Path(dashboard_data_root).resolve()
+    if not root.exists():
+        return []
+
+    discovered: list[Path] = []
+    for session_dir in sorted([path for path in root.iterdir() if path.is_dir()], key=natural_sort_key):
+        voice_dir = session_dir / "voice"
+        if not voice_dir.is_dir():
+            continue
+        class_dirs = [path for path in voice_dir.iterdir() if path.is_dir()]
+        if required_class_names is not None:
+            class_dir_names = {path.name for path in class_dirs}
+            if not (class_dir_names & required_class_names):
+                continue
+        has_audio = any(
+            audio_path.is_file() and audio_path.suffix.lower() in AUDIO_SUFFIXES
+            for class_dir in class_dirs
+            for audio_path in class_dir.rglob("*")
+        )
+        if has_audio:
+            discovered.append(voice_dir)
+    return discovered
 
 
 def normalize_speaker_name(name: str) -> str:

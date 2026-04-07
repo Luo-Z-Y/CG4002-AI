@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 70" width="800" height="70">
+  <rect width="800" height="70" rx="14" fill="#ffcb05" stroke="#d4a800" stroke-width="2"/>
+
+  <text x="400" y="28" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#3a2a00" letter-spacing="5" font-weight="700">CG4002 · COMPUTER ENGINEERING CAPSTONE</text>
+
+  <!-- Pokeball dots -->
+  <circle cx="340" cy="50" r="7" fill="#cc3333" stroke="#aa2222" stroke-width="1"/>
+  <circle cx="362" cy="50" r="7" fill="white" stroke="#d4a800" stroke-width="1"/>
+  <circle cx="384" cy="50" r="7" fill="#3b4cca" stroke="#2a3aaa" stroke-width="1"/>
+  <circle cx="406" cy="50" r="7" fill="#cc3333" stroke="#aa2222" stroke-width="1"/>
+  <circle cx="428" cy="50" r="7" fill="white" stroke="#d4a800" stroke-width="1"/>
+  <circle cx="450" cy="50" r="7" fill="#3b4cca" stroke="#2a3aaa" stroke-width="1"/>
+</svg>

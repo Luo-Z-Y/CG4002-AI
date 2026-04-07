@@ -12,13 +12,13 @@ This folder contains the runtime that:
 
 ## Main Files
 
-- [deployment.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/deployment.py): main bridge entry point
-- [runtime.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/runtime.py): Ultra96 overlay and DMA wrapper
-- [hardware.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/hardware.py): core names, DMA names, Q8.8 packing, label defaults
-- [audio.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/audio.py): voice preprocessing and MFCC helpers
-- [imu.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/imu.py): IMU trimming, baseline removal, and resampling
-- [messages.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/messages.py): packet schema
-- [dual_cnn.xsa](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/dual_cnn.xsa): deployed overlay
+- [deployment.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/deployment.py): main bridge entry point
+- [runtime.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/runtime.py): Ultra96 overlay and DMA wrapper
+- [hardware.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/hardware.py): core names, DMA names, Q8.8 packing, label defaults
+- [audio.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/audio.py): voice preprocessing and MFCC helpers
+- [imu.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/imu.py): IMU trimming, baseline removal, and resampling
+- [messages.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/messages.py): packet schema
+- [dual_cnn.xsa](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/dual_cnn.xsa): deployed overlay
 
 ## Runtime Contract
 
@@ -31,10 +31,11 @@ This folder contains the runtime that:
 5. Enforce trimmed count band `40` to `300`.
 6. Remove per-window baseline using the first `5` frames.
 7. FFT-resample to `60 x 6`.
-8. Pack to Q8.8 and send to the gesture HLS core.
-9. Publish a gesture result packet.
+8. Apply software z-score normalisation using `gesture_mean.npy` and `gesture_std.npy`.
+9. Pack to Q8.8 and send to the gesture HLS core.
+10. Publish a gesture result packet.
 
-Gesture normalisation is fused into the exported weights, so deployment does not apply a separate `mean/std` step for gesture.
+Gesture uses non-fused weights. The software normalisation files must therefore match the exported gesture weights.
 
 ### Voice Path
 
@@ -53,14 +54,14 @@ Voice uses non-fused weights. The software normalisation files must therefore ma
 
 ## Current Label Defaults
 
-Defined in [hardware.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/hardware.py):
+Defined in [hardware.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/hardware.py):
 
 - Gesture: `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
 - Voice: `Bulbasaur`, `Charizard`, `Pikachu`
 
 ## MQTT Topics
 
-Default topics from [common.py](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/common.py):
+Default topics from [common.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/common.py):
 
 - subscribe IMU: `esp32/+/sensor/imu`
 - subscribe voice: `phone/+/viz/mic`
@@ -164,12 +165,17 @@ Note: `confidence` is currently a placeholder default because the deployed hardw
 
 ### Always required
 
-- [dual_cnn.xsa](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/dual_cnn.xsa)
+- [dual_cnn.xsa](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/dual_cnn.xsa)
 
 ### Required for voice software normalisation
 
-- [voice_mean.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy)
-- [voice_std.npy](/Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
+- [voice_mean.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy)
+- [voice_std.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
+
+### Required for gesture software normalisation
+
+- [gesture_mean.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/gesture_mean.npy)
+- [gesture_std.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/gesture_std.npy)
 
 ### Required in the overlay build itself
 
@@ -180,7 +186,7 @@ Note: `confidence` is currently a placeholder default because the deployed hardw
 Default run:
 
 ```bash
-cd /Users/luozhiyang/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Y4S2/CG4002/CG4002-Code/CG4002-AI/ultra96/deployment
+cd /Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment
 python3 deployment.py
 ```
 
@@ -190,6 +196,14 @@ Explicit voice normalisation paths:
 python3 deployment.py \
   --voice-mean ./voice_mean.npy \
   --voice-std ./voice_std.npy
+```
+
+Explicit gesture normalisation paths:
+
+```bash
+python3 deployment.py \
+  --gesture-mean ./gesture_mean.npy \
+  --gesture-std ./gesture_std.npy
 ```
 
 Explicit overlay, core names, and DMA names:
@@ -230,7 +244,7 @@ This is useful for checking what the board actually received and what was sent i
 ### Gesture
 
 - Training and deployment preprocessing are aligned.
-- Gesture runtime expects the exported fused-normalisation weights.
+- Gesture runtime expects non-fused weights plus software `gesture_mean/std`.
 
 ### Voice
 

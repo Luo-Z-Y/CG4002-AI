@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 import json
+import mimetypes
+import os
 import threading
+import sys
 import time
 import uuid
 import wave
@@ -13,6 +17,26 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOCAL_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
+
+
+def _ensure_local_python() -> None:
+    current = Path(sys.executable).resolve()
+    if not LOCAL_PYTHON.exists():
+        return
+    if current == LOCAL_PYTHON.resolve():
+        return
+    if os.environ.get("CG4002_DASHBOARD_LOCAL_BOOTSTRAP") == "1":
+        return
+    env = os.environ.copy()
+    env["CG4002_DASHBOARD_LOCAL_BOOTSTRAP"] = "1"
+    os.execve(str(LOCAL_PYTHON), [str(LOCAL_PYTHON), __file__, *sys.argv[1:]], env)
+
+
+_ensure_local_python()
 
 import numpy as np
 
@@ -21,6 +45,8 @@ from runtime import GESTURE_LABELS, VOICE_LABELS, LocalAiRuntime, _decode_audio_
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DATA_ROOT = Path(__file__).resolve().parent / "data"
+VOICE_TEST_PREDICTIONS_FILENAME = "voice_test_predictions.csv"
+VOICE_DELETED_LOG_FILENAME = "deleted_test_audio_log.csv"
 RUNTIME: LocalAiRuntime | None = None
 STORE: "DashboardStore | None" = None
 STATE_LOCK = threading.Lock()
@@ -44,6 +70,127 @@ def _decode_base64_to_bytes(text: str) -> bytes:
     return base64.b64decode(text.encode("ascii"))
 
 
+def _path_within(base: Path, target: Path) -> bool:
+    try:
+        target.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_voice_cleanup_predictions_path() -> Path | None:
+    candidates: list[Path] = []
+    if RUNTIME is not None:
+        candidates.append(RUNTIME.voice_mean_path.parent / VOICE_TEST_PREDICTIONS_FILENAME)
+
+    audio_root = PROJECT_ROOT / "data" / "audio"
+    if audio_root.exists():
+        candidates.extend(audio_root.rglob(VOICE_TEST_PREDICTIONS_FILENAME))
+
+    seen: set[Path] = set()
+    existing = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            existing.append(resolved)
+    if not existing:
+        return None
+    return max(existing, key=lambda path: path.stat().st_mtime)
+
+
+def _load_voice_cleanup_rows(predictions_path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with predictions_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            audio_path_str = str(row.get("path", "")).strip()
+            if not audio_path_str:
+                continue
+            audio_path = Path(audio_path_str).resolve()
+            if not _path_within(PROJECT_ROOT, audio_path):
+                continue
+            is_correct = str(row.get("is_correct", "")).strip().lower() in {"1", "true", "yes"}
+            if is_correct:
+                continue
+            rows.append(
+                {
+                    "manifest_idx": row.get("manifest_idx"),
+                    "test_local_idx": row.get("test_local_idx"),
+                    "true_label": row.get("true_label"),
+                    "pred_label": row.get("pred_label"),
+                    "q88_pred_label": row.get("q88_pred_label"),
+                    "speaker_id": row.get("speaker_id"),
+                    "utterance_id": row.get("utterance_id"),
+                    "source": row.get("source"),
+                    "label": row.get("label"),
+                    "model_variant": row.get("model_variant"),
+                    "split_seed": row.get("split_seed"),
+                    "path": str(audio_path),
+                    "exists": audio_path.exists(),
+                    "audio_url": f"/api/voice-cleanup/audio?path={audio_path.as_posix()}",
+                }
+            )
+    return rows
+
+
+def _append_voice_deleted_log(log_path: Path, row: dict[str, Any]) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "deleted_at",
+        "manifest_idx",
+        "test_local_idx",
+        "true_label",
+        "pred_label",
+        "q88_pred_label",
+        "speaker_id",
+        "utterance_id",
+        "source",
+        "label",
+        "model_variant",
+        "split_seed",
+        "path",
+    ]
+    exists = log_path.exists()
+    with log_path.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        if not exists:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "deleted_at": datetime.now().isoformat(timespec="seconds"),
+                "manifest_idx": row.get("manifest_idx"),
+                "test_local_idx": row.get("test_local_idx"),
+                "true_label": row.get("true_label"),
+                "pred_label": row.get("pred_label"),
+                "q88_pred_label": row.get("q88_pred_label"),
+                "speaker_id": row.get("speaker_id"),
+                "utterance_id": row.get("utterance_id"),
+                "source": row.get("source"),
+                "label": row.get("label"),
+                "model_variant": row.get("model_variant"),
+                "split_seed": row.get("split_seed"),
+                "path": row.get("path"),
+            }
+        )
+
+
+def _remove_prediction_row(predictions_path: Path, path_to_remove: str) -> int:
+    with predictions_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    kept_rows = [row for row in rows if str(row.get("path", "")).strip() != path_to_remove]
+    with predictions_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        if fieldnames:
+            writer.writeheader()
+        writer.writerows(kept_rows)
+    return len(rows) - len(kept_rows)
+
+
 def _write_audio_file(path: Path, payload: bytes) -> None:
     path.write_bytes(payload)
 
@@ -59,14 +206,29 @@ def _write_wav_from_float_list(path: Path, values: list[float], sample_rate: int
         wav_out.writeframes(pcm.tobytes())
 
 
-def _write_gesture_packet_file(path: Path, samples: list[list[float]]) -> None:
+def _gesture_sample_values(row: Any) -> list[float]:
+    if isinstance(row, dict):
+        return [
+            float(row["gx"]),
+            float(row["gy"]),
+            float(row["gz"]),
+            float(row["ax"]),
+            float(row["ay"]),
+            float(row["az"]),
+        ]
+    if isinstance(row, (list, tuple)) and len(row) >= 6:
+        return [float(value) for value in row[:6]]
+    raise ValueError("Gesture sample rows must be dicts with gx/gy/gz/ax/ay/az or sequences of six values")
+
+
+def _write_gesture_packet_file(path: Path, samples: list[Any]) -> None:
     lines = [
         "==== Gesture Packet ====",
         f"Sample count: {len(samples)}",
         "Idx | gx | gy | gz | ax | ay | az",
     ]
     for idx, row in enumerate(samples):
-        values = [float(value) for value in row[:6]]
+        values = _gesture_sample_values(row)
         lines.append(
             f"{idx} | {values[0]:.6f} | {values[1]:.6f} | {values[2]:.6f} | "
             f"{values[3]:.6f} | {values[4]:.6f} | {values[5]:.6f}"
@@ -85,12 +247,14 @@ class DashboardStore:
         "Punch": "punch",
     }
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, gesture_labels: list[str], voice_labels: list[str]) -> None:
         stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
         self.root = root.resolve()
         self.session_dir = (self.root / stamp).resolve()
         self.gesture_dir = self.session_dir / "gesture"
         self.voice_dir = self.session_dir / "voice"
+        self.gesture_labels = list(gesture_labels)
+        self.voice_labels = list(voice_labels)
         self.pending_gesture: dict[str, dict[str, Any]] = {}
         self.reviewed_gesture: dict[str, dict[str, Any]] = {}
         self.pending_voice: dict[str, dict[str, Any]] = {}
@@ -98,9 +262,9 @@ class DashboardStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.gesture_dir.mkdir(parents=True, exist_ok=True)
         self.voice_dir.mkdir(parents=True, exist_ok=True)
-        for label in GESTURE_LABELS:
+        for label in self.gesture_labels:
             (self.gesture_dir / self._label_slug(label)).mkdir(parents=True, exist_ok=True)
-        for label in VOICE_LABELS:
+        for label in self.voice_labels:
             (self.voice_dir / self._label_slug(label)).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -289,29 +453,79 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._send_bytes(path.read_bytes(), content_type)
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/":
+        parsed = urlparse(self.path)
+        if parsed.path == "/":
             self._serve_static("index.html")
             return
-        if self.path == "/app.js":
+        if parsed.path == "/app.js":
             self._serve_static("app.js")
             return
-        if self.path == "/styles.css":
+        if parsed.path == "/styles.css":
             self._serve_static("styles.css")
             return
-        if self.path == "/api/state":
+        if parsed.path == "/api/state":
             with STATE_LOCK:
                 payload = {
-                    "gesture_labels": GESTURE_LABELS,
-                    "voice_labels": VOICE_LABELS,
+                    "gesture_labels": list(RUNTIME.gesture_labels) if RUNTIME is not None else GESTURE_LABELS,
+                    "voice_labels": list(RUNTIME.voice_labels) if RUNTIME is not None else VOICE_LABELS,
                     **LATEST_STATE,
                 }
             self._send_json(payload)
+            return
+        if parsed.path == "/api/voice-cleanup/list":
+            predictions_path = _resolve_voice_cleanup_predictions_path()
+            if predictions_path is None:
+                self._send_json(
+                    {
+                        "items": [],
+                        "artifact_dir": None,
+                        "predictions_path": None,
+                        "error": "voice_test_predictions.csv not found. Re-run the voice notebook training cell first.",
+                    }
+                )
+                return
+            rows = _load_voice_cleanup_rows(predictions_path)
+            query = parse_qs(parsed.query)
+            offset = max(int(query.get("offset", ["0"])[0]), 0)
+            limit = max(min(int(query.get("limit", ["40"])[0]), 200), 1)
+            page_rows = rows[offset:offset + limit]
+            for row in page_rows:
+                row["audio_url"] = f"/api/voice-cleanup/audio?path={row['path']}"
+            self._send_json(
+                {
+                    "items": page_rows,
+                    "total": len(rows),
+                    "offset": offset,
+                    "limit": limit,
+                    "artifact_dir": str(predictions_path.parent),
+                    "predictions_path": str(predictions_path),
+                    "deleted_log_path": str(predictions_path.parent / VOICE_DELETED_LOG_FILENAME),
+                    "error": None,
+                }
+            )
+            return
+        if parsed.path == "/api/voice-cleanup/audio":
+            query = parse_qs(parsed.query)
+            path_value = query.get("path", [None])[0]
+            if not isinstance(path_value, str) or not path_value.strip():
+                self._send_json({"error": "path query parameter is required"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            audio_path = Path(path_value).resolve()
+            if not _path_within(PROJECT_ROOT, audio_path):
+                self._send_json({"error": "Audio path is outside the project root"}, status=HTTPStatus.FORBIDDEN)
+                return
+            if not audio_path.exists() or not audio_path.is_file():
+                self._send_json({"error": "Audio file not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            content_type = mimetypes.guess_type(str(audio_path))[0] or "application/octet-stream"
+            self._send_bytes(audio_path.read_bytes(), content_type)
             return
         self._send_json({"error": f"Unknown path: {self.path}"}, status=HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
         try:
-            if self.path == "/api/gesture/infer":
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/gesture/infer":
                 payload = self._read_json()
                 samples = payload.get("samples")
                 if not isinstance(samples, list) or not samples:
@@ -332,7 +546,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(result)
                 return
 
-            if self.path == "/api/voice/infer":
+            if parsed.path == "/api/voice/infer":
                 payload = self._read_json()
                 if RUNTIME is None:
                     raise RuntimeError("Runtime not initialised")
@@ -350,7 +564,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(result)
                 return
 
-            if self.path == "/api/review":
+            if parsed.path == "/api/review":
                 payload = self._read_json()
                 kind = payload.get("kind")
                 sample_id = payload.get("sample_id")
@@ -362,7 +576,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     raise ValueError("sample_id is required")
                 if not isinstance(is_correct, bool):
                     raise ValueError("is_correct must be boolean")
-                valid_labels = GESTURE_LABELS if kind == "gesture" else VOICE_LABELS
+                if kind == "gesture":
+                    valid_labels = list(RUNTIME.gesture_labels) if RUNTIME is not None else GESTURE_LABELS
+                else:
+                    valid_labels = list(RUNTIME.voice_labels) if RUNTIME is not None else VOICE_LABELS
                 if not is_correct:
                     if not isinstance(correct_label, str) or correct_label not in valid_labels:
                         raise ValueError("correct_label is required when the prediction is wrong")
@@ -376,6 +593,36 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     if isinstance(current, dict) and current.get("sample_id") == sample_id:
                         current["review"] = review
                 self._send_json({"ok": True, "review": review, "sample_id": sample_id, "kind": kind})
+                return
+
+            if parsed.path == "/api/voice-cleanup/delete":
+                payload = self._read_json()
+                path_value = payload.get("path")
+                if not isinstance(path_value, str) or not path_value.strip():
+                    raise ValueError("path is required")
+                predictions_path = _resolve_voice_cleanup_predictions_path()
+                if predictions_path is None:
+                    raise FileNotFoundError("voice_test_predictions.csv not found")
+                rows = _load_voice_cleanup_rows(predictions_path)
+                row = next((item for item in rows if item["path"] == path_value), None)
+                if row is None:
+                    raise FileNotFoundError("Clip not found in voice cleanup predictions")
+                audio_path = Path(path_value).resolve()
+                if not _path_within(PROJECT_ROOT, audio_path):
+                    raise ValueError("Audio path is outside the project root")
+                if not audio_path.exists():
+                    raise FileNotFoundError(f"Audio file not found: {audio_path}")
+                audio_path.unlink()
+                _append_voice_deleted_log(predictions_path.parent / VOICE_DELETED_LOG_FILENAME, row)
+                removed_rows = _remove_prediction_row(predictions_path, str(audio_path))
+                self._send_json(
+                    {
+                        "ok": True,
+                        "deleted_path": str(audio_path),
+                        "removed_rows": removed_rows,
+                        "deleted_log_path": str(predictions_path.parent / VOICE_DELETED_LOG_FILENAME),
+                    }
+                )
                 return
 
             self._send_json({"error": f"Unknown path: {self.path}"}, status=HTTPStatus.NOT_FOUND)
@@ -393,6 +640,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gesture-mean", default=None, help="Optional path to gesture_mean.npy for software IMU normalisation")
     parser.add_argument("--gesture-std", default=None, help="Optional path to gesture_std.npy for software IMU normalisation")
     parser.add_argument("--voice-weights", default=None, help="Optional path to voice_cnn_weights.h")
+    parser.add_argument("--voice-checkpoint", default=None, help="Optional path to a voice_dashboard_model.pt checkpoint for local dashboard inference")
     parser.add_argument("--voice-mean", default=None, help="Optional path to voice_mean.npy for software MFCC normalisation")
     parser.add_argument("--voice-std", default=None, help="Optional path to voice_std.npy for software MFCC normalisation")
     parser.add_argument("--data-root", default=str(DATA_ROOT), help="Root folder for captured dashboard samples")
@@ -402,7 +650,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     global RUNTIME, STORE
-    STORE = DashboardStore(Path(args.data_root))
     RUNTIME = LocalAiRuntime(
         gesture_weights=args.gesture_weights,
         voice_weights=args.voice_weights,
@@ -410,7 +657,9 @@ def main() -> None:
         gesture_std=args.gesture_std,
         voice_mean=args.voice_mean,
         voice_std=args.voice_std,
+        voice_checkpoint=args.voice_checkpoint,
     )
+    STORE = DashboardStore(Path(args.data_root), gesture_labels=GESTURE_LABELS, voice_labels=RUNTIME.voice_labels)
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     with STATE_LOCK:
         LATEST_STATE["session_dir"] = str(STORE.session_dir)
@@ -420,6 +669,8 @@ def main() -> None:
     print(f"Gesture mean: {RUNTIME.gesture_mean_path}")
     print(f"Gesture std: {RUNTIME.gesture_std_path}")
     print(f"Voice weights: {RUNTIME.voice_weights_path}")
+    print(f"Voice checkpoint: {RUNTIME.voice_checkpoint_path}")
+    print(f"Voice model source: {RUNTIME.voice_model_source}")
     print(f"Voice mean: {RUNTIME.voice_mean_path}")
     print(f"Voice std: {RUNTIME.voice_std_path}")
     try:
