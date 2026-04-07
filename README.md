@@ -5,7 +5,7 @@ AI training, local testing, HLS export, and Ultra96 deployment support for the C
 This workspace currently supports:
 
 - gesture classification with `6` classes: `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
-- voice classification with `3` classes: `Bulbasaur`, `Charizard`, `Pikachu`
+- voice classification with `6` classes: `Bulbasaur`, `Charizard`, `Greninja`, `Lugia`, `Mewtwo`, `Pikachu`
 - local browser-based testing for both models
 - HLS header export for the Windows Vitis flow
 - Ultra96 MQTT deployment with separate gesture and voice accelerators
@@ -28,15 +28,19 @@ This workspace currently supports:
 ### Voice
 
 - Training notebook: [train_voice_cnn.ipynb](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/notebooks/train_voice_cnn.ipynb)
-- Active combined sources:
-  - [data/audio/20260313](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260313)
-  - [data/audio/20260321](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260321)
+- Active combined artefact folder: [data/audio/20260406_combined](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260406_combined)
+- Active raw source buckets:
+  - [data/audio/20260406/new](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260406/new)
+  - [data/audio/20260406/old](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260406/old)
+  - [data/audio/20260406/synthetic](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/data/audio/20260406/synthetic)
+  - reviewed dashboard voice clips under [dashboard/data](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/dashboard/data)
 - Current runtime normalisation files: [ultra96/deployment/voice_mean.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_mean.npy) and [ultra96/deployment/voice_std.npy](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/voice_std.npy)
-- Test policy: hold out `5` speakers from `20260321`
+- Test policy: stratified random file split, randomised per run by default unless you pin `SPLIT_SEED`
 - Preprocessing contract:
   - decode raw audio to mono `16 kHz`
-  - silence trim
-  - loudness normalisation
+  - tighter silence trim plus focus windowing
+  - pre-emphasis
+  - cepstral mean normalisation before dataset z-score
   - MFCC extraction to `40 x 50`
 - Runtime normalisation strategy: software MFCC z-score using `voice_mean.npy` and `voice_std.npy`
 
@@ -121,9 +125,12 @@ Important notes:
 
 - The notebook uses the shared deployment-aligned pipeline in [voice_feature_pipeline.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/tools/voice_feature_pipeline.py).
 - `USE_CLEANED_AUDIO` should stay `False` for deployment parity.
-- The active output label is `combined`.
-- The current split holds out `5` speakers from `20260321` for test.
+- The active output label is `20260406_combined`.
+- The notebook currently supports two voice model variants:
+  - `deployed`: current 16/32-channel HLS-compatible model
+  - `experimental`: modestly wider 20/40-channel notebook-only model
 - Voice export uses `fuse_input_norm=False`.
+- The dashboard can load a notebook checkpoint directly from `voice_dashboard_model.pt`, so local dashboard testing is no longer limited to the current HLS-compatible voice shape.
 
 Main voice artefacts are expected under the selected audio artefact folder:
 
@@ -136,6 +143,10 @@ Main voice artefacts are expected under the selected audio artefact folder:
 - `voice_y_test.npy`
 - `voice_mean.npy`
 - `voice_std.npy`
+- `voice_labels.json`
+- `voice_preprocess_config.json`
+- `voice_test_predictions.csv`
+- `voice_dashboard_model.pt`
 - `voice_cnn_weights.h`
 
 ## HLS Export And Windows Flow
@@ -155,6 +166,8 @@ After fully rerunning the notebooks, the usual files to copy to your Windows HLS
 - [hls/voice/voice_cnn.cpp](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.cpp)
 - [hls/voice/voice_cnn.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.h)
 - [hls/voice/voice_typedefs.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_typedefs.h)
+
+Only the `deployed` voice variant exports to the current HLS header layout. The `experimental` voice variant stays notebook and dashboard only until the HLS voice IP is widened to match it.
 
 For voice deployment, the software path also needs:
 
@@ -201,6 +214,14 @@ The dashboard supports:
 - processed waveform playback
 - processed MFCC visualisation
 - exact IMU tables
+- a `Cleanup` tab that reads `voice_test_predictions.csv` and lets you play or delete misclassified test clips
+
+Voice model loading in the dashboard now works like this:
+
+- prefer the newest `voice_dashboard_model.pt` checkpoint if one exists
+- otherwise fall back to [hls/voice/voice_cnn_weights.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn_weights.h)
+
+That means the dashboard can test the current `experimental` notebook model even when Ultra96 and HLS still use the older deployed voice shape.
 
 ## Live Gesture Testing From Hardware
 
@@ -233,9 +254,10 @@ cd /Users/luozhiyang/Projects/CG4002-Code/CG4002-HW
 
 - Training feature generation uses the deployment preprocessor.
 - Dashboard and Ultra96 both apply `voice_mean/std` in software.
-- Voice export is intentionally non-fused.
+- Voice export is intentionally non-fused for the deployed HLS path.
+- The dashboard may instead load `voice_dashboard_model.pt` for notebook-parity local testing.
 - Ultra96 and dashboard both expect the same class order:
-  - `Bulbasaur`, `Charizard`, `Pikachu`
+  - `Bulbasaur`, `Charizard`, `Greninja`, `Lugia`, `Mewtwo`, `Pikachu`
 
 ## Ultra96 Deployment
 
