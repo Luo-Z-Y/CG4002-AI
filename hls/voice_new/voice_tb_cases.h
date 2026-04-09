@@ -1,3 +1,4 @@
+// Placeholder copied from hls/voice. Re-run the voice notebook testbench-generation cell with MODEL_VARIANT='experimental' to refresh this file for hls/voice_new.
 #ifndef VOICE_TB_CASES_H
 #define VOICE_TB_CASES_H
 

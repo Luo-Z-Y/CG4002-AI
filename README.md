@@ -58,7 +58,8 @@ CG4002-AI/
 │   └── gesture/
 ├── hls/
 │   ├── gesture/
-│   └── voice/
+│   ├── voice/
+│   └── voice_new/
 ├── notebooks/
 │   ├── train_gesture_cnn.ipynb
 │   └── train_voice_cnn.ipynb
@@ -128,7 +129,7 @@ Important notes:
 - The active output label is `20260406_combined`.
 - The notebook currently supports two voice model variants:
   - `deployed`: current 16/32-channel HLS-compatible model
-  - `experimental`: modestly wider 20/40-channel notebook-only model
+  - `experimental`: modestly wider 20/40-channel model with a separate HLS folder under [hls/voice_new](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice_new)
 - Voice export uses `fuse_input_norm=False`.
 - The dashboard can load a notebook checkpoint directly from `voice_dashboard_model.pt`, so local dashboard testing is no longer limited to the current HLS-compatible voice shape.
 
@@ -166,8 +167,15 @@ After fully rerunning the notebooks, the usual files to copy to your Windows HLS
 - [hls/voice/voice_cnn.cpp](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.cpp)
 - [hls/voice/voice_cnn.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_cnn.h)
 - [hls/voice/voice_typedefs.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice/voice_typedefs.h)
+- [hls/voice_new/voice_cnn_weights.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice_new/voice_cnn_weights.h)
+- [hls/voice_new/voice_cnn.cpp](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice_new/voice_cnn.cpp)
+- [hls/voice_new/voice_cnn.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice_new/voice_cnn.h)
+- [hls/voice_new/voice_typedefs.h](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice_new/voice_typedefs.h)
 
-Only the `deployed` voice variant exports to the current HLS header layout. The `experimental` voice variant stays notebook and dashboard only until the HLS voice IP is widened to match it.
+Voice export now follows the selected notebook variant:
+
+- `deployed` exports to [hls/voice](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice)
+- `experimental` exports to [hls/voice_new](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/hls/voice_new)
 
 For voice deployment, the software path also needs:
 

@@ -18,6 +18,19 @@ EXPECTED_HLS_STATE_NAMES = (
     "fc.bias",
 )
 
+VOICE_MODEL_VARIANT_SPECS = {
+    "deployed": {
+        "conv1_channels": 16,
+        "conv2_channels": 32,
+        "hls_subdir": "voice",
+    },
+    "experimental": {
+        "conv1_channels": 20,
+        "conv2_channels": 40,
+        "hls_subdir": "voice_new",
+    },
+}
+
 
 class _VoiceCNNBase(nn.Module):
     """Shared 2-conv voice backbone used by both deployed and experimental variants."""
@@ -131,6 +144,15 @@ def build_voice_model(
     raise ValueError(f"Unknown voice model variant: {variant}")
 
 
+def voice_hls_subdir_for_variant(variant: str) -> str:
+    """Return the HLS export subdirectory for a voice-model variant."""
+
+    try:
+        return VOICE_MODEL_VARIANT_SPECS[variant]["hls_subdir"]
+    except KeyError as exc:
+        raise ValueError(f"Unknown voice model variant: {variant}") from exc
+
+
 def is_hls_shape_compatible_model(model: nn.Module) -> bool:
     """Return whether the model matches the current HLS voice IP channel sizes."""
 
@@ -229,13 +251,24 @@ def build_hls_export_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
     return state
 
 
-def assert_hls_state_shapes(state_dict: Dict[str, torch.Tensor], num_classes: int) -> None:
+def assert_hls_state_shapes(
+    state_dict: Dict[str, torch.Tensor],
+    num_classes: int,
+    variant: str = "deployed",
+) -> None:
+    try:
+        spec = VOICE_MODEL_VARIANT_SPECS[variant]
+    except KeyError as exc:
+        raise ValueError(f"Unknown voice model variant: {variant}") from exc
+
+    conv1_channels = int(spec["conv1_channels"])
+    conv2_channels = int(spec["conv2_channels"])
     expected_shapes = {
-        "conv1.weight": (16, 40, 3),
-        "conv1.bias": (16,),
-        "conv2.weight": (32, 16, 3),
-        "conv2.bias": (32,),
-        "fc.weight": (num_classes, 32),
+        "conv1.weight": (conv1_channels, 40, 3),
+        "conv1.bias": (conv1_channels,),
+        "conv2.weight": (conv2_channels, conv1_channels, 3),
+        "conv2.bias": (conv2_channels,),
+        "fc.weight": (num_classes, conv2_channels),
         "fc.bias": (num_classes,),
     }
     missing = sorted(set(expected_shapes) - set(state_dict))
