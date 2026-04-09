@@ -57,7 +57,7 @@ Voice uses non-fused weights. The software normalisation files must therefore ma
 Defined in [hardware.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI/ultra96/deployment/hardware.py):
 
 - Gesture: `Raise`, `Shake`, `Chop`, `Stir`, `Swing`, `Punch`
-- Voice: `Bulbasaur`, `Charizard`, `Pikachu`
+- Voice: `Bulbasaur`, `Charizard`, `Greninja`, `Lugia`, `Mewtwo`, `Pikachu`
 
 ## MQTT Topics
 
@@ -68,6 +68,8 @@ Default topics from [common.py](/Users/luozhiyang/Projects/CG4002-Code/CG4002-AI
 - publish action: `ultra96/ai/action`
 - publish pokemon: `ultra96/ai/pokemon`
 - publish error: `ultra96/ai/error`
+
+These AI topics are shared and do not include `device_id` in the topic path. The bridge publishes `device_id` inside the JSON payload so subscribers can correlate responses.
 
 ## Input JSON Formats
 
@@ -123,6 +125,7 @@ Published to `ultra96/ai/action`:
     "label": "Raise",
     "confidence": 1.0
   },
+  "device_id": "1",
   "player": "1",
   "source_topic": "esp32/1/sensor/imu"
 }
@@ -139,6 +142,7 @@ Published to `ultra96/ai/pokemon`:
     "label": "Bulbasaur",
     "confidence": 1.0
   },
+  "device_id": "1",
   "player": "1",
   "source_topic": "phone/1/viz/mic"
 }
@@ -155,6 +159,7 @@ Published to `ultra96/ai/error`:
     "source_topic": "esp32/1/sensor/imu",
     "message": "error text here"
   },
+  "device_id": "1",
   "player": "1"
 }
 ```

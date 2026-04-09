@@ -65,13 +65,19 @@ def reason_code_value(reason_code: Any) -> int:
     return int(reason_code)
 
 
-def extract_player_id(topic: str) -> Optional[str]:
+def extract_device_id(topic: str) -> Optional[str]:
     parts = [part for part in topic.split("/") if part]
     if len(parts) < 4:
         return None
     if parts[2] not in {"sensor", "viz"}:
         return None
     return parts[1]
+
+
+def extract_player_id(topic: str) -> Optional[str]:
+    """Backward-compatible alias for older code paths that still say player."""
+
+    return extract_device_id(topic)
 
 
 class SuppressFileErrors:

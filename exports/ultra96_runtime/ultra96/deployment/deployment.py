@@ -39,7 +39,7 @@ from common import (
     SuppressMqttErrors,
     default_client_id,
     extract_audio_bytes,
-    extract_player_id,
+    extract_device_id,
     normalize_suffix,
     parse_labels,
     reason_code_value,
@@ -195,7 +195,7 @@ class MqttAiBridge:
         self.queue.put(InboundMessage(topic=message.topic, payload=bytes(message.payload)))
 
     def _process_message(self, message: InboundMessage) -> None:
-        player_id = extract_player_id(message.topic)
+        device_id = extract_device_id(message.topic)
         try:
             if mqtt.topic_matches_sub(self.args.imu_topic, message.topic):
                 if self.args.debug:
@@ -203,13 +203,13 @@ class MqttAiBridge:
                 raw_data = self._parse_imu_payload(message.payload)
                 raw_count = raw_data.count if raw_data.count is not None else len(raw_data.samples)
                 data = self.imu_preprocessor.preprocess(raw_data)
-                self._capture_imu_sample(message.topic, player_id, message.payload, raw_data, data)
+                self._capture_imu_sample(message.topic, device_id, message.payload, raw_data, data)
                 if self.args.debug:
                     print(self._describe_imu(message.topic, raw_count, data))
                 result = self.runtime.classify_imu(data)
-                self._publish_result(self.args.action_topic, MessageKind.ACTION, result, player_id, message.topic)
+                self._publish_result(self.args.action_topic, MessageKind.ACTION, result, device_id, message.topic)
                 print(
-                    f"IMU player={player_id or 'unknown'} -> action={result.label} "
+                    f"IMU device={device_id or 'unknown'} -> action={result.label} "
                     f"confidence={result.confidence:.4f}"
                 )
                 return
@@ -217,22 +217,22 @@ class MqttAiBridge:
             if self.args.voice_topic and mqtt.topic_matches_sub(self.args.voice_topic, message.topic):
                 if self.args.debug:
                     print(self._describe_payload("VOICE", message.topic, message.payload))
-                data = self._parse_voice_payload(message.topic, player_id, message.payload)
+                data = self._parse_voice_payload(message.topic, device_id, message.payload)
                 if data is None:
                     return
                 if self.args.debug:
                     print(self._describe_voice(message.topic, data))
                 result = self.runtime.classify_voice_mfcc(data)
-                self._publish_result(self.args.pokemon_topic, MessageKind.POKEMON, result, player_id, message.topic)
+                self._publish_result(self.args.pokemon_topic, MessageKind.POKEMON, result, device_id, message.topic)
                 print(
-                    f"VOICE player={player_id or 'unknown'} -> pokemon={result.label} "
+                    f"VOICE device={device_id or 'unknown'} -> pokemon={result.label} "
                     f"confidence={result.confidence:.4f}"
                 )
                 return
 
             raise ValueError(f"Received MQTT message on unexpected topic: {message.topic}")
         except Exception as exc:
-            self._publish_error(message.topic, str(exc), player_id)
+            self._publish_error(message.topic, str(exc), device_id)
             print(f"[ERROR] topic={message.topic} error={exc}")
             if self.args.debug:
                 preview = message.payload[:160].decode("utf-8", errors="replace")
@@ -315,19 +315,20 @@ class MqttAiBridge:
         cleaned = cleaned.strip("._")
         return cleaned or "unknown"
 
-    def _capture_stem(self, topic: str, player_id: Optional[str]) -> str:
+    def _capture_stem(self, topic: str, device_id: Optional[str]) -> str:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-        safe_player = self._sanitize_component(player_id or "unknown")
+        safe_device = self._sanitize_component(device_id or "unknown")
         safe_topic = self._sanitize_component(topic.replace("/", "_"))
-        return f"{stamp}_player-{safe_player}_{safe_topic}"
+        return f"{stamp}_device-{safe_device}_{safe_topic}"
 
-    def _capture_imu_sample(self, topic: str, player_id: Optional[str], payload: bytes, raw_data: ImuData, data: ImuData) -> None:
-        stem = self._capture_stem(topic, player_id)
+    def _capture_imu_sample(self, topic: str, device_id: Optional[str], payload: bytes, raw_data: ImuData, data: ImuData) -> None:
+        stem = self._capture_stem(topic, device_id)
         parsed = try_parse_json(payload)
         raw_record = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "topic": topic,
-            "player": player_id,
+            "device_id": device_id,
+            "player": device_id,
             "raw_count": raw_data.count,
             "raw_payload": parsed if parsed is not None else payload.decode("utf-8", errors="replace"),
             "raw_data": raw_data.to_dict(),
@@ -335,7 +336,8 @@ class MqttAiBridge:
         resampled_record = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "topic": topic,
-            "player": player_id,
+            "device_id": device_id,
+            "player": device_id,
             "raw_count": raw_data.count,
             "processed_count": data.count,
             "processed_data": data.to_dict(),
@@ -358,13 +360,13 @@ class MqttAiBridge:
     def _capture_voice_audio(
         self,
         topic: str,
-        player_id: Optional[str],
+        device_id: Optional[str],
         payload: bytes,
         suffix: str,
         mfcc: np.ndarray,
         raw_mfcc: Optional[np.ndarray] = None,
     ) -> None:
-        stem = self._capture_stem(topic, player_id)
+        stem = self._capture_stem(topic, device_id)
         normalized_suffix = normalize_suffix(suffix)
         raw_audio_path = self.capture_raw_audio_dir / f"{stem}{normalized_suffix}"
         raw_meta_path = self.capture_raw_audio_dir / f"{stem}.json"
@@ -380,7 +382,8 @@ class MqttAiBridge:
         raw_metadata = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "topic": topic,
-            "player": player_id,
+            "device_id": device_id,
+            "player": device_id,
             "suffix": normalized_suffix,
             "bytes": len(payload),
             "audio_file": raw_audio_path.name,
@@ -394,7 +397,8 @@ class MqttAiBridge:
         augmented_metadata = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "topic": topic,
-            "player": player_id,
+            "device_id": device_id,
+            "player": device_id,
             "audio_file": augmented_audio_path.name,
             "sample_rate": self.args.voice_sample_rate,
             "preprocess": debug,
@@ -405,7 +409,8 @@ class MqttAiBridge:
         mfcc_metadata = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "topic": topic,
-            "player": player_id,
+            "device_id": device_id,
+            "player": device_id,
             "mfcc_file": mfcc_path.name,
             "mfcc_shape": [int(mfcc.shape[0]), int(mfcc.shape[1])],
             "preprocess": debug,
@@ -501,7 +506,7 @@ class MqttAiBridge:
 
         raise ValueError("Unsupported IMU payload format")
 
-    def _parse_voice_payload(self, topic: str, player_id: Optional[str], payload: bytes) -> Optional[VoiceMfccData]:
+    def _parse_voice_payload(self, topic: str, device_id: Optional[str], payload: bytes) -> Optional[VoiceMfccData]:
         parsed = try_parse_json(payload)
         if isinstance(parsed, dict):
             packet_type = parsed.get("type")
@@ -519,17 +524,17 @@ class MqttAiBridge:
                 if not chunk.is_complete:
                     return None
                 print(f"Complete audio received: {chunk.message_id}")
-                return self._mfcc_from_file_bytes(topic, player_id, chunk.audio_bytes, chunk.suffix)
+                return self._mfcc_from_file_bytes(topic, device_id, chunk.audio_bytes, chunk.suffix)
 
             audio_bytes = extract_audio_bytes(candidate)
             if audio_bytes is not None:
                 filename = str(candidate.get("filename") or candidate.get("name") or "")
                 suffix = Path(filename).suffix or self.args.voice_file_extension
-                return self._mfcc_from_file_bytes(topic, player_id, audio_bytes, suffix)
+                return self._mfcc_from_file_bytes(topic, device_id, audio_bytes, suffix)
 
-        return self._mfcc_from_file_bytes(topic, player_id, payload, self.args.voice_file_extension)
+        return self._mfcc_from_file_bytes(topic, device_id, payload, self.args.voice_file_extension)
 
-    def _mfcc_from_file_bytes(self, topic: str, player_id: Optional[str], payload: bytes, suffix: str) -> VoiceMfccData:
+    def _mfcc_from_file_bytes(self, topic: str, device_id: Optional[str], payload: bytes, suffix: str) -> VoiceMfccData:
         temp_path = self.spool_dir / f"voice-{uuid.uuid4().hex}{normalize_suffix(suffix)}"
         self._last_voice_debug_meta = f"suffix={normalize_suffix(suffix)} bytes={len(payload)}"
         temp_path.write_bytes(payload)
@@ -547,7 +552,7 @@ class MqttAiBridge:
                 "norm_mean": float(mfcc.mean()),
                 "norm_std": float(mfcc.std()),
             }
-            self._capture_voice_audio(topic, player_id, payload, suffix, mfcc, raw_mfcc=raw_mfcc)
+            self._capture_voice_audio(topic, device_id, payload, suffix, mfcc, raw_mfcc=raw_mfcc)
             return VoiceMfccData.from_dict(
                 {"shape": [int(mfcc.shape[0]), int(mfcc.shape[1])], "features": mfcc.tolist()}
             )
@@ -561,21 +566,23 @@ class MqttAiBridge:
         topic: str,
         kind: MessageKind,
         result: ClassificationData,
-        player_id: Optional[str],
+        device_id: Optional[str],
         source_topic: str,
     ) -> None:
         packet = Packet(kind=kind, data=result.to_dict()).to_dict()
-        if player_id is not None:
-            packet["player"] = player_id
+        if device_id is not None:
+            packet["device_id"] = device_id
+            packet["player"] = device_id
         packet["source_topic"] = source_topic
         self.client.publish(topic, json.dumps(packet, separators=(",", ":"), ensure_ascii=True), qos=self.args.publish_qos)
 
-    def _publish_error(self, source_topic: str, message: str, player_id: Optional[str]) -> None:
+    def _publish_error(self, source_topic: str, message: str, device_id: Optional[str]) -> None:
         if not self.args.error_topic:
             return
         payload = {"type": "error", "data": {"source_topic": source_topic, "message": message}}
-        if player_id is not None:
-            payload["player"] = player_id
+        if device_id is not None:
+            payload["device_id"] = device_id
+            payload["player"] = device_id
         self.client.publish(
             self.args.error_topic,
             json.dumps(payload, separators=(",", ":"), ensure_ascii=True),
