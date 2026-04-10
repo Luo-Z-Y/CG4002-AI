@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 import sys
 import re
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -23,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 from ultra96.deployment.audio import VoicePreprocessor, decode_m4a_to_waveform
 
 
-AUDIO_SUFFIXES = {".wav", ".m4a"}
+AUDIO_SUFFIXES = {".wav", ".m4a", ".mp3"}
 
 
 def _supported_preprocess_kwargs(preprocess_kwargs: dict[str, Any] | None) -> dict[str, Any]:
@@ -96,6 +97,34 @@ def build_feature_set_from_manifest(
         )
         all_y.append(int(row[label_column]))
     return np.stack(all_X, axis=0), np.asarray(all_y, dtype=np.int64)
+
+
+def filter_manifest_to_decodable_audio(
+    manifest_df: pd.DataFrame,
+    path_column: str = "path",
+    sample_rate: int = 16000,
+    ffmpeg_path: str = "ffmpeg",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Drop manifest rows whose audio cannot be decoded by the shared ffmpeg path."""
+
+    keep_rows: list[dict[str, object]] = []
+    drop_rows: list[dict[str, object]] = []
+
+    for row in manifest_df.to_dict(orient="records"):
+        path = Path(str(row[path_column])).resolve()
+        try:
+            decode_audio_file(path, sample_rate=sample_rate, ffmpeg_path=ffmpeg_path)
+            keep_rows.append(row)
+        except (FileNotFoundError, ValueError, subprocess.CalledProcessError) as exc:
+            bad_row = dict(row)
+            bad_row["decode_error"] = str(exc)
+            drop_rows.append(bad_row)
+
+    filtered_df = pd.DataFrame(keep_rows, columns=manifest_df.columns)
+    dropped_df = pd.DataFrame(drop_rows)
+    if not filtered_df.empty:
+        filtered_df = filtered_df.reset_index(drop=True)
+    return filtered_df, dropped_df
 
 
 def natural_sort_key(path_like: str | Path) -> list[object]:

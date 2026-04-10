@@ -46,8 +46,13 @@ from common import (
     try_parse_json,
     hw,
 )
-from audio import VoicePreprocessor, load_feature_norm_stats, m4a_to_mfcc_matrix, normalize_feature_matrix
-from imu import ImuPreprocessor, load_feature_norm_stats, normalize_window
+from audio import (
+    VoicePreprocessor,
+    load_feature_norm_stats as load_voice_feature_norm_stats,
+    m4a_to_mfcc_matrix,
+    normalize_feature_matrix,
+)
+from imu import ImuPreprocessor, load_feature_norm_stats as load_gesture_feature_norm_stats, normalize_window
 from messages import ClassificationData, ImuData, MessageKind, Packet, VoiceMfccData, build_imu_data
 from reconstruct import VoiceChunkReconstructor
 from runtime import Ultra96Runtime
@@ -57,12 +62,23 @@ DEFAULT_VOICE_MEAN_PATH = SCRIPT_DIR / "voice_mean.npy"
 DEFAULT_VOICE_STD_PATH = SCRIPT_DIR / "voice_std.npy"
 DEFAULT_GESTURE_MEAN_PATH = SCRIPT_DIR / "gesture_mean.npy"
 DEFAULT_GESTURE_STD_PATH = SCRIPT_DIR / "gesture_std.npy"
+VOICE_PREPROCESS_CONFIG_FILENAME = "voice_preprocess_config.json"
 
 
 @dataclass(slots=True)
 class InboundMessage:
     topic: str
     payload: bytes
+
+
+def load_voice_preprocess_config(input_path: str | Path) -> dict[str, Any] | None:
+    path = Path(input_path)
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 class MqttAiBridge:
@@ -84,11 +100,21 @@ class MqttAiBridge:
         )
         self.gesture_mean_path = Path(args.gesture_mean).resolve()
         self.gesture_std_path = Path(args.gesture_std).resolve()
-        self.gesture_mean, self.gesture_std = load_feature_norm_stats(self.gesture_mean_path, self.gesture_std_path)
-        self.voice_preprocessor = VoicePreprocessor(sample_rate=args.voice_sample_rate)
+        self.gesture_mean, self.gesture_std = load_gesture_feature_norm_stats(
+            self.gesture_mean_path,
+            self.gesture_std_path,
+        )
         self.voice_mean_path = Path(args.voice_mean).resolve()
         self.voice_std_path = Path(args.voice_std).resolve()
-        self.voice_mean, self.voice_std = load_feature_norm_stats(self.voice_mean_path, self.voice_std_path)
+        self.voice_mean, self.voice_std = load_voice_feature_norm_stats(
+            self.voice_mean_path,
+            self.voice_std_path,
+        )
+        self.voice_preprocess_config = self._resolve_voice_preprocess_config()
+        self.voice_preprocessor = VoicePreprocessor(
+            sample_rate=args.voice_sample_rate,
+            **self.voice_preprocess_config,
+        )
         self.imu_preprocessor = ImuPreprocessor(
             min_count=args.imu_min_count,
             max_count=args.imu_max_count,
@@ -130,6 +156,22 @@ class MqttAiBridge:
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
+
+    def _resolve_voice_preprocess_config(self) -> dict[str, Any]:
+        candidates = [
+            self.voice_mean_path.parent / VOICE_PREPROCESS_CONFIG_FILENAME,
+            SCRIPT_DIR / VOICE_PREPROCESS_CONFIG_FILENAME,
+        ]
+        seen: set[Path] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            config = load_voice_preprocess_config(resolved)
+            if config is not None:
+                return config
+        return {}
 
     @classmethod
     def _resolve_session_name(cls, raw_value: Optional[str]) -> str:
@@ -175,6 +217,7 @@ class MqttAiBridge:
         print(f"Capture session: {self.capture_session_dir}")
         print(f"Gesture normalization stats: mean={self.gesture_mean_path} std={self.gesture_std_path}")
         print(f"Voice normalization stats: mean={self.voice_mean_path} std={self.voice_std_path}")
+        print(f"Voice preprocess config: {self.voice_preprocess_config}")
         client.subscribe(self.args.imu_topic, qos=self.args.subscribe_qos)
         print(f"Subscribed to IMU topic: {self.args.imu_topic}")
         if self.args.voice_topic:
