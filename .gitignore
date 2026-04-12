@@ -1,9 +1,18 @@
-.venv
-data/audio/
-data/gesture/
-dashboard/data
+# Virtual environment
+.venv/
 
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
 .DS_Store
 
-#ignore pem file
+# Data directories
+data/audio/
+data/gesture/
+dashboard/data/
+
+# Secrets
 *.pem
