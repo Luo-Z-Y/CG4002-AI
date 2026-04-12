@@ -1,8 +1,0 @@
-{
-  "cepstral_mean_norm": true,
-  "pitch_focus_energy_threshold_db": -14.0,
-  "pitch_focus_half_window_s": 0.7,
-  "pre_emphasis": 0.97,
-  "trim_pad_ms": 40.0,
-  "trim_threshold_db": -24.0
-}

@@ -13,6 +13,8 @@ __pycache__/
 data/audio/
 data/gesture/
 dashboard/data/
+tools/pokemon_voices/
+tools/tts_failures.jsonl
 
 # Secrets
 *.pem
