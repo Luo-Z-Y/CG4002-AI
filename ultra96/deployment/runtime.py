@@ -106,7 +106,23 @@ class Ultra96Runtime:
             hw.start_core(core)
             hw.run_dma(dma, in_buffer, out_buffer, timeout_s=self.timeout_s)
             return int(out_buffer[0])
+        except Exception:
+            # A timed-out transaction can leave the core/DMA path wedged. Reset the
+            # active path so later requests can still make progress.
+            try:
+                hw.stop_core(core)
+            except Exception:
+                pass
+            try:
+                hw.reset_dma(dma)
+            except Exception:
+                pass
+            raise
         finally:
+            try:
+                hw.stop_core(core)
+            except Exception:
+                pass
             try:
                 in_buffer.close()
                 out_buffer.close()
